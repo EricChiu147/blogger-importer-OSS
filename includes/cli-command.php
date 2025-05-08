@@ -5,6 +5,36 @@
  * This file registers a WP-CLI command for importing Blogger content.
  *
  * @package Blogger_Import_OpenSource
+ * 
+ * 
+ * Import content from a Blogger XML export file.
+ *
+ * ## OPTIONS
+ *
+ * <file>
+ * : Path to the Blogger XML export file.
+ *
+ * [--skip-media]
+ * : Skip importing media files.
+ *
+ * [--map-file=<file>]
+ * : Path to output mapping file (CSV format).
+ *
+ * [--author=<id>]
+ * : User ID to use as the author of imported content.
+ *
+ * [--use-current-user]
+ * : Use current WordPress user as the author for all imported content.
+ *
+ * ## EXAMPLES
+ *
+ *     wp blogger-import import /path/to/blogger-export.xml
+ *     wp blogger-import import /path/to/blogger-export.xml --skip-media
+ *     wp blogger-import import /path/to/blogger-export.xml --use-current-user
+ *
+ * @param array $args       Command arguments
+ * @param array $assoc_args Command associative arguments
+ * @return void
  */
 
 // If this file is called directly, abort.
@@ -63,7 +93,31 @@ if (defined('WP_CLI') && WP_CLI) {
             // Parse options
             $skip_media = isset($assoc_args['skip-media']);
             $map_file = isset($assoc_args['map-file']) ? $assoc_args['map-file'] : '';
-            $author_id = isset($assoc_args['author']) ? (int) $assoc_args['author'] : get_current_user_id();
+            $use_current_user = isset($assoc_args['use-current-user']);
+            
+            // Get author ID - prioritize explicit author parameter
+            $author_id = 0;
+            if (isset($assoc_args['author'])) {
+                $author_id = (int) $assoc_args['author'];
+            } elseif ($use_current_user) {
+                $author_id = get_current_user_id();
+            }
+            
+            // Check author exists if specified
+            if ($author_id > 0) {
+                $author = get_user_by('id', $author_id);
+                if (!$author) {
+                    WP_CLI::error('Author not found. User ID: ' . $author_id);
+                    return;
+                }
+            }
+            
+            // Save import options
+            BIO_DB_Handler::save_import_options(array(
+                'skip_media' => $skip_media,
+                'use_current_user' => $use_current_user,
+                'author_override' => $author_id
+            ));
             
             // Check author exists
             $author = get_user_by('id', $author_id);

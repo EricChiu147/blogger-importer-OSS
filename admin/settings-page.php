@@ -467,3 +467,21 @@ function bio_ajax_check_progress() {
     }
 }
 add_action('wp_ajax_bio_check_progress', 'bio_ajax_check_progress');
+
+/**
+ * Process the import form submission
+ */
+private function process_import_form() {
+    // Verify nonce and other validations...
+    
+    // Get form data
+    $file = $_FILES['blogger_xml'];
+    $options = array(
+        'skip_media' => isset($_POST['skip_media']),
+        'use_current_user' => isset($_POST['use_current_user']), // Add this line
+        'create_redirects' => isset($_POST['create_redirects']),
+        'redirect_type' => isset($_POST['redirect_type']) ? sanitize_text_field($_POST['redirect_type']) : 'htaccess'
+    );
+    
+    // Rest of your processing code...
+}

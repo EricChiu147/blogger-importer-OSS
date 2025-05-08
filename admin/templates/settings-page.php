@@ -145,6 +145,25 @@ if (!defined('WPINC')) {
                     </tr>
                 </table>
                 
+                <!-- Add this inside your form, before the submit button -->
+                <tr>
+                    <th scope="row">
+                        <label for="use-current-user"><?php _e('Post Authorship', 'blogger-import-opensource'); ?></label>
+                    </th>
+                    <td>
+                        <fieldset>
+                            <legend class="screen-reader-text"><?php _e('Post Authorship', 'blogger-import-opensource'); ?></legend>
+                            <label for="use-current-user">
+                                <input name="use_current_user" type="checkbox" id="use-current-user" value="1" checked="checked">
+                                <?php _e('Use current WordPress user as author for all imported content', 'blogger-import-opensource'); ?>
+                            </label>
+                            <p class="description">
+                                <?php _e('When checked, all imported posts, pages and comments will use your current user as the author, ignoring original author information.', 'blogger-import-opensource'); ?>
+                            </p>
+                        </fieldset>
+                    </td>
+                </tr>
+
                 <p class="submit">
                     <input type="submit" name="submit" id="submit" class="button button-primary" value="<?php _e('Import', 'blogger-import-opensource'); ?>">
                 </p>

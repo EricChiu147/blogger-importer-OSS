@@ -221,4 +221,33 @@ class BIO_DB_Handler {
     public static function clear_errors() {
         return delete_option('bio_import_errors');
     }
+
+    /**
+     * Save import options
+     *
+     * @param array $options Import options
+     * @return bool Success or failure
+     */
+    public static function save_import_options($options) {
+        return update_option('bio_import_options', $options);
+    }
+
+    /**
+     * Get import options
+     *
+     * @return array Import options
+     */
+    public static function get_import_options() {
+        $default_options = array(
+            'skip_media' => false,
+            'use_current_user' => true,
+            'create_redirects' => false,
+            'redirect_type' => 'htaccess',
+            'author_override' => 0
+        );
+        
+        $options = get_option('bio_import_options', array());
+        
+        return wp_parse_args($options, $default_options);
+    }
 }

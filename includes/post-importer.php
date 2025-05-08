@@ -211,3 +211,37 @@ function bio_import_post($post_data) {
 function bio_import_posts($posts, $show_progress = true) {
     return BIO_Post_Importer::import_posts($posts, $show_progress);
 }
+
+/**
+ * Get WordPress user ID from Blogger author
+ *
+ * @param string $blogger_author Blogger author name or email
+ * @return int|false WordPress user ID or false if not found
+ */
+function bio_get_author_id($blogger_author) {
+    // First try to find by email
+    $user = get_user_by('email', $blogger_author);
+    
+    if ($user) {
+        return $user->ID;
+    }
+    
+    // Then try by login/username
+    $user = get_user_by('login', $blogger_author);
+    
+    if ($user) {
+        return $user->ID;
+    }
+    
+    // Then try by display name
+    $users = get_users(array(
+        'meta_key' => 'display_name',
+        'meta_value' => $blogger_author
+    ));
+    
+    if (!empty($users) && isset($users[0])) {
+        return $users[0]->ID;
+    }
+    
+    return false;
+}
