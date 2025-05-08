@@ -25,6 +25,9 @@ class BIO_Admin {
         add_action('admin_post_bio_import', array(__CLASS__, 'handle_import'));
         add_action('admin_post_bio_download_mapping', array(__CLASS__, 'handle_download_mapping'));
         add_action('admin_notices', array(__CLASS__, 'display_notices'));
+        
+        // Register AJAX handlers as class methods
+        add_action('wp_ajax_bio_check_progress', array(__CLASS__, 'ajax_check_progress'));
     }
     
     /**
@@ -283,6 +286,43 @@ class BIO_Admin {
                 return __('Unknown upload error.', 'blogger-import-opensource');
         }
     }
+    
+    /**
+     * Check import progress via AJAX
+     */
+    public static function ajax_check_progress() {
+        // Verify nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'bio_ajax_nonce')) {
+            wp_send_json_error('Invalid nonce');
+        }
+        
+        $progress = BIO_DB_Handler::get_import_progress();
+        
+        if ($progress) {
+            wp_send_json_success($progress);
+        } else {
+            // Check if there was an error
+            $last_error = get_option('bio_last_import_error');
+            
+            if ($last_error) {
+                delete_option('bio_last_import_error');
+                wp_send_json_error(array('message' => $last_error));
+            }
+            
+            // Check if there was a success
+            $last_success = get_option('bio_last_import_success');
+            
+            if ($last_success) {
+                delete_option('bio_last_import_success');
+                wp_send_json_success(array(
+                    'completed' => true,
+                    'stats' => $last_success
+                ));
+            }
+            
+            wp_send_json_error(array('message' => __('No import in progress.', 'blogger-import-opensource')));
+        }
+    }
 }
 
 // Initialize admin
@@ -428,60 +468,5 @@ function bio_process_import($options) {
         update_option('bio_last_import_error', $e->getMessage());
     }
 }
+// Register the action hook for the import process
 add_action('bio_process_import', 'bio_process_import');
-
-/**
- * Check import progress via AJAX
- */
-function bio_ajax_check_progress() {
-    // Verify nonce
-    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'bio_ajax_nonce')) {
-        wp_send_json_error('Invalid nonce');
-    }
-    
-    $progress = BIO_DB_Handler::get_import_progress();
-    
-    if ($progress) {
-        wp_send_json_success($progress);
-    } else {
-        // Check if there was an error
-        $last_error = get_option('bio_last_import_error');
-        
-        if ($last_error) {
-            delete_option('bio_last_import_error');
-            wp_send_json_error(array('message' => $last_error));
-        }
-        
-        // Check if there was a success
-        $last_success = get_option('bio_last_import_success');
-        
-        if ($last_success) {
-            delete_option('bio_last_import_success');
-            wp_send_json_success(array(
-                'completed' => true,
-                'stats' => $last_success
-            ));
-        }
-        
-        wp_send_json_error(array('message' => __('No import in progress.', 'blogger-import-opensource')));
-    }
-}
-add_action('wp_ajax_bio_check_progress', 'bio_ajax_check_progress');
-
-/**
- * Process the import form submission
- */
-private function process_import_form() {
-    // Verify nonce and other validations...
-    
-    // Get form data
-    $file = $_FILES['blogger_xml'];
-    $options = array(
-        'skip_media' => isset($_POST['skip_media']),
-        'use_current_user' => isset($_POST['use_current_user']), // Add this line
-        'create_redirects' => isset($_POST['create_redirects']),
-        'redirect_type' => isset($_POST['redirect_type']) ? sanitize_text_field($_POST['redirect_type']) : 'htaccess'
-    );
-    
-    // Rest of your processing code...
-}
