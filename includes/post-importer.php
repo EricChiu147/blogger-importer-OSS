@@ -221,12 +221,12 @@ class BIO_Post_Importer {
      * @return string      Properly encoded text
      */
     public static function fix_encoding($text) {
-        // If we have a DB handler with encoding fix functionality, use it
-        if (class_exists('BIO_DB_Handler') && method_exists('BIO_DB_Handler', 'ensure_proper_encoding')) {
-            return BIO_DB_Handler::ensure_proper_encoding($text);
+        // Use utility function if available
+        if (function_exists('bio_fix_encoding')) {
+            return bio_fix_encoding($text);
         }
         
-        // Fallback implementation if the DB handler method isn't available
+        // Fallback implementation if the utility function isn't available
         // Fix Unicode escape sequences like u5408u7968 (Chinese characters)
         if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
             $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
@@ -298,14 +298,4 @@ function bio_get_author_id($blogger_author) {
     }
     
     return false;
-}
-
-/**
- * Fix encoding in texts for use in other parts of the plugin
- *
- * @param string $text Text to fix encoding issues
- * @return string      Fixed text
- */
-function bio_fix_encoding($text) {
-    return BIO_Post_Importer::fix_encoding($text);
 }
