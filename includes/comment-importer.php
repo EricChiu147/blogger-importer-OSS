@@ -280,17 +280,13 @@ class BIO_Comment_Importer {
      * @return string      Properly encoded text
      */
     public static function fix_encoding($text) {
-        // If we have a DB handler with encoding fix functionality, use it
-        if (class_exists('BIO_DB_Handler') && method_exists('BIO_DB_Handler', 'ensure_proper_encoding')) {
-            return BIO_DB_Handler::ensure_proper_encoding($text);
-        }
-        
-        // If we have the Post Importer's fix function, use that
+        // Use centralized utility function if available
         if (function_exists('bio_fix_encoding')) {
             return bio_fix_encoding($text);
         }
         
-        // Fallback implementation if neither method is available
+        // Fallback if utility function isn't available
+        // This is a simplified fallback implementation
         
         // Fix Unicode escape sequences like u5408u7968 (Chinese characters)
         if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
