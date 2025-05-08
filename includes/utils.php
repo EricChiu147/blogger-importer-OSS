@@ -91,8 +91,11 @@ function bio_get_url_extension($url) {
  * @return string          Sanitized filename
  */
 function bio_sanitize_filename($filename) {
-    // Remove invalid characters
-    $filename = preg_replace('/[^a-zA-Z0-9-_.]/', '', $filename);
+    // Fix encoding issues first
+    $filename = bio_fix_encoding($filename);
+    
+    // Use WordPress's sanitize_file_name which better handles international characters
+    $filename = sanitize_file_name($filename);
     
     // Ensure it's not empty
     if (empty($filename)) {
@@ -110,6 +113,9 @@ function bio_sanitize_filename($filename) {
  * @return string           Unique slug
  */
 function bio_generate_unique_slug($title, $post_type = 'post') {
+    // Fix encoding issues in title before generating slug
+    $title = bio_fix_encoding($title);
+    
     $slug = sanitize_title($title);
     
     // Check if slug exists
@@ -198,9 +204,53 @@ function bio_sanitize_array($array) {
         if (is_array($value)) {
             $array[$key] = bio_sanitize_array($value);
         } else {
+            // Fix encoding before sanitizing
+            $value = bio_fix_encoding($value);
             $array[$key] = sanitize_text_field($value);
         }
     }
     
     return $array;
+}
+
+/**
+ * Fix encoding issues in text, especially for Chinese characters
+ * This is a centralized utility function for fixing encoding
+ *
+ * @param string $text Text that may have encoding issues
+ * @return string      Properly encoded text
+ */
+function bio_fix_encoding($text) {
+    // Use the BIO_DB_Handler method if available
+    if (class_exists('BIO_DB_Handler') && method_exists('BIO_DB_Handler', 'ensure_proper_encoding')) {
+        return BIO_DB_Handler::ensure_proper_encoding($text);
+    }
+    
+    // Fallback implementation
+    // Fix Unicode escape sequences like u5408u7968 (Chinese characters)
+    if (is_string($text) && preg_match('/u[0-9a-fA-F]{4}/', $text)) {
+        $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
+            return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
+        }, $text);
+    }
+    
+    // Ensure proper UTF-8 encoding if mbstring is available
+    if (is_string($text) && function_exists('mb_check_encoding') && !mb_check_encoding($text, 'UTF-8')) {
+        if (function_exists('mb_convert_encoding')) {
+            $text = mb_convert_encoding($text, 'UTF-8', 'auto');
+        }
+    }
+    
+    return $text;
+}
+
+/**
+ * Check if a string contains Chinese characters
+ *
+ * @param string $text Text to check
+ * @return bool        True if contains Chinese characters
+ */
+function bio_has_chinese_characters($text) {
+    // Check for common Chinese character Unicode ranges
+    return preg_match('/[\x{4e00}-\x{9fff}\x{3400}-\x{4dbf}\x{20000}-\x{2a6df}\x{2a700}-\x{2b73f}\x{2b740}-\x{2b81f}\x{2b820}-\x{2ceaf}\x{f900}-\x{faff}\x{2f800}-\x{2fa1f}]/u', $text);
 }

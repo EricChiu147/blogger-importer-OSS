@@ -163,6 +163,74 @@ class BIO_DB_Handler {
     }
     
     /**
+     * Update post content with proper encoding
+     *
+     * @param int    $post_id Post ID to update
+     * @param string $content Content with possible encoding issues
+     * @return bool           Whether the update was successful
+     */
+    public static function update_post_content($post_id, $content) {
+        // Process content for Chinese character encoding if needed
+        $content = self::ensure_proper_encoding($content);
+        
+        // Update the post with fixed content
+        return wp_update_post(
+            array(
+                'ID' => $post_id,
+                'post_content' => $content
+            )
+        ) !== 0;
+    }
+    
+    /**
+     * Update post title with proper encoding
+     *
+     * @param int    $post_id Post ID to update
+     * @param string $title   Title with possible encoding issues
+     * @return bool           Whether the update was successful
+     */
+    public static function update_post_title($post_id, $title) {
+        // Process title for Chinese character encoding if needed
+        $title = self::ensure_proper_encoding($title);
+        
+        // Update the post with fixed title
+        return wp_update_post(
+            array(
+                'ID' => $post_id,
+                'post_title' => $title
+            )
+        ) !== 0;
+    }
+    
+    /**
+     * Ensure proper encoding for text
+     *
+     * @param string $text Text that may have encoding issues
+     * @return string      Properly encoded text
+     */
+    public static function ensure_proper_encoding($text) {
+        // Check for Unicode escape sequences like u5408u7968 (Chinese characters)
+        if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
+            $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
+                return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
+            }, $text);
+        }
+        
+        // Check if we need to convert encoding
+        if (function_exists('mb_check_encoding') && !mb_check_encoding($text, 'UTF-8')) {
+            // Try to detect and convert encoding
+            if (function_exists('mb_detect_encoding')) {
+                $encoding = mb_detect_encoding($text, array('UTF-8', 'ISO-8859-1', 'GBK', 'BIG5', 'GB18030'), true);
+                if ($encoding && $encoding !== 'UTF-8') {
+                    $text = mb_convert_encoding($text, 'UTF-8', $encoding);
+                }
+            }
+        }
+        
+        return $text;
+    }
+    
+    /**
      * Store import statistics
      *
      * @param array $stats Import statistics

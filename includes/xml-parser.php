@@ -72,9 +72,27 @@ class BIO_XML_Parser {
         }
         
         try {
+            // Load the file content with encoding handling
+            $xml_string = file_get_contents($this->xml_file);
+            
+            // Handle potential encoding issues
+            if (function_exists('mb_check_encoding') && !mb_check_encoding($xml_string, 'UTF-8')) {
+                // Try to convert to UTF-8
+                if (function_exists('mb_detect_encoding')) {
+                    $encoding = mb_detect_encoding($xml_string, array('UTF-8', 'ISO-8859-1', 'GBK', 'BIG5', 'GB18030'), true);
+                    if ($encoding) {
+                        $xml_string = mb_convert_encoding($xml_string, 'UTF-8', $encoding);
+                    }
+                }
+            }
+            
+            // Create a temporary file with the processed content
+            $temp_file = tempnam(sys_get_temp_dir(), 'bio_');
+            file_put_contents($temp_file, $xml_string);
+            
             // Use XMLReader for memory-efficient parsing
             $reader = new XMLReader();
-            $reader->open($this->xml_file);
+            $reader->open($temp_file);
             
             // Initialize data arrays
             $data = array(
@@ -129,6 +147,11 @@ class BIO_XML_Parser {
             }
             
             $reader->close();
+            
+            // Clean up temporary file
+            if (file_exists($temp_file)) {
+                unlink($temp_file);
+            }
             
             // Process post-comment relationships
             $data = $this->process_comment_relationships($data);
@@ -208,11 +231,18 @@ class BIO_XML_Parser {
      * @return array                       Processed entry data
      */
     private function process_content_entry($entry, $entry_type, $namespaces) {
+        $title = (string) $entry->title;
+        $content = (string) $entry->content;
+        
+        // Fix Unicode escape sequences in title and content
+        $title = $this->fix_unicode_sequences($title);
+        $content = $this->fix_unicode_sequences($content);
+        
         $data = array(
             'type' => $entry_type,
             'id' => (string) $entry->id,
-            'title' => (string) $entry->title,
-            'content' => (string) $entry->content,
+            'title' => $title,
+            'content' => $content,
             'published' => (string) $entry->published,
             'updated' => (string) $entry->updated,
             'author' => array(
@@ -269,10 +299,14 @@ class BIO_XML_Parser {
         $in_reply_to = $thr->{'in-reply-to'};
         $ref = (string) $in_reply_to->attributes()->{'ref'};
         
+        $content = (string) $entry->content;
+        // Fix Unicode escape sequences in comment content
+        $content = $this->fix_unicode_sequences($content);
+        
         $data = array(
             'type' => 'comment',
             'id' => (string) $entry->id,
-            'content' => (string) $entry->content,
+            'content' => $content,
             'published' => (string) $entry->published,
             'updated' => (string) $entry->updated,
             'author' => array(
@@ -296,6 +330,23 @@ class BIO_XML_Parser {
     }
     
     /**
+     * Fix Unicode escape sequences in text
+     * 
+     * @param string $text Text that might contain Unicode escape sequences
+     * @return string      Fixed text with proper Unicode characters
+     */
+    private function fix_unicode_sequences($text) {
+        // Fix sequences like u5408u7968 (Chinese characters)
+        if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
+            $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
+                return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
+            }, $text);
+        }
+        
+        return $text;
+    }
+    
+    /**
      * Process comment relationships to establish hierarchy
      *
      * @param array $data Parsed data
@@ -316,7 +367,7 @@ class BIO_XML_Parser {
             $comment = &$data['comments'][$i];
             
             // If the post_id is a comment ID, it's a reply to a comment
-            if (in_array($comment['post_id'], array_merge(...array_values($post_comment_map)))) {
+            if (!empty($post_comment_map) && array_values($post_comment_map) && in_array($comment['post_id'], array_merge(...array_values($post_comment_map)))) {
                 foreach ($data['comments'] as $other_comment) {
                     if ($other_comment['id'] == $comment['post_id']) {
                         $comment['parent_id'] = $other_comment['id'];

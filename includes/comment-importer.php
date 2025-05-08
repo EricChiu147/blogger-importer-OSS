@@ -30,6 +30,15 @@ class BIO_Comment_Importer {
             return $existing_comment_id; // Already imported
         }
         
+        // Fix encoding for comment content and author name
+        if (isset($comment_data['content'])) {
+            $comment_data['content'] = self::fix_encoding($comment_data['content']);
+        }
+        
+        if (isset($comment_data['author']['name'])) {
+            $comment_data['author']['name'] = self::fix_encoding($comment_data['author']['name']);
+        }
+        
         // Format dates
         $comment_date = bio_format_date($comment_data['published']);
         
@@ -105,13 +114,18 @@ class BIO_Comment_Importer {
             
             // Update progress
             if ($show_progress) {
+                // Use fixed encoding for display in progress
+                $author_name = isset($comment_data['author']['name']) ? 
+                    self::fix_encoding($comment_data['author']['name']) : 
+                    __('Unknown Author', 'blogger-import-opensource');
+                
                 $progress = array(
                     'step' => 'import_comments',
                     'current' => $current,
                     'total' => $total_comments,
                     'percentage' => ($total_comments > 0) ? round(($current / $total_comments) * 100) : 0,
-                    'message' => sprintf(__('Importing comment %d of %d', 'blogger-import-opensource'), 
-                                       $current, $total_comments)
+                    'message' => sprintf(__('Importing comment %d of %d by %s', 'blogger-import-opensource'), 
+                                       $current, $total_comments, $author_name)
                 );
                 BIO_DB_Handler::update_import_progress($progress);
             }
@@ -258,6 +272,42 @@ class BIO_Comment_Importer {
         
         return $results;
     }
+    
+    /**
+     * Fix encoding issues in text, especially for Chinese characters
+     *
+     * @param string $text Text that may have encoding issues
+     * @return string      Properly encoded text
+     */
+    public static function fix_encoding($text) {
+        // If we have a DB handler with encoding fix functionality, use it
+        if (class_exists('BIO_DB_Handler') && method_exists('BIO_DB_Handler', 'ensure_proper_encoding')) {
+            return BIO_DB_Handler::ensure_proper_encoding($text);
+        }
+        
+        // If we have the Post Importer's fix function, use that
+        if (function_exists('bio_fix_encoding')) {
+            return bio_fix_encoding($text);
+        }
+        
+        // Fallback implementation if neither method is available
+        
+        // Fix Unicode escape sequences like u5408u7968 (Chinese characters)
+        if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
+            $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
+                return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
+            }, $text);
+        }
+        
+        // Ensure proper UTF-8 encoding
+        if (function_exists('mb_check_encoding') && !mb_check_encoding($text, 'UTF-8')) {
+            if (function_exists('mb_convert_encoding')) {
+                $text = mb_convert_encoding($text, 'UTF-8', 'auto');
+            }
+        }
+        
+        return $text;
+    }
 }
 
 /**
@@ -293,4 +343,14 @@ function bio_import_comments($comments, $wp_post_id, $show_progress = true) {
  */
 function bio_import_all_comments($comments, $post_mapping, $show_progress = true) {
     return BIO_Comment_Importer::import_all_comments($comments, $post_mapping, $show_progress);
+}
+
+/**
+ * Fix encoding in comment text
+ *
+ * @param string $text Text to fix encoding issues
+ * @return string      Fixed text
+ */
+function bio_fix_comment_encoding($text) {
+    return BIO_Comment_Importer::fix_encoding($text);
 }

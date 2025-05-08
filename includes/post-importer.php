@@ -32,6 +32,15 @@ class BIO_Post_Importer {
             return $existing_post_id; // Post already imported
         }
         
+        // Fix encoding for title and content
+        if (isset($post_data['title'])) {
+            $post_data['title'] = self::fix_encoding($post_data['title']);
+        }
+        
+        if (isset($post_data['content'])) {
+            $post_data['content'] = self::fix_encoding($post_data['content']);
+        }
+        
         // Convert content to blocks
         $blocks_content = bio_convert_to_blocks($post_data['content']);
         
@@ -58,6 +67,16 @@ class BIO_Post_Importer {
             'ping_status'   => 'open',
         );
         
+        // Override author if specified
+        if (isset($post_data['author_override']) && $post_data['author_override'] > 0) {
+            $wp_post['post_author'] = $post_data['author_override'];
+        } else if (!empty($post_data['author']['email'])) {
+            $author_id = self::find_author_id($post_data['author']);
+            if ($author_id) {
+                $wp_post['post_author'] = $author_id;
+            }
+        }
+        
         // Allow filtering of post data
         $wp_post = apply_filters('bio_pre_insert_post', $wp_post, $post_data);
         
@@ -83,7 +102,9 @@ class BIO_Post_Importer {
         
         // Add tags/categories
         if (!empty($post_data['tags'])) {
-            BIO_Tag_Handler::import_tags($post_id, $post_data['tags']);
+            // Fix encoding for tags
+            $fixed_tags = array_map(array('self', 'fix_encoding'), $post_data['tags']);
+            BIO_Tag_Handler::import_tags($post_id, $fixed_tags);
         }
         
         // Process media in the content
@@ -121,13 +142,16 @@ class BIO_Post_Importer {
             
             // Update progress
             if ($show_progress) {
+                // Fix encoding in title before displaying in progress
+                $title = isset($post_data['title']) ? self::fix_encoding($post_data['title']) : '';
+                
                 $progress = array(
                     'step' => 'import_posts',
                     'current' => $current,
                     'total' => $total_posts,
                     'percentage' => ($total_posts > 0) ? round(($current / $total_posts) * 100) : 0,
                     'message' => sprintf(__('Importing post %d of %d: %s', 'blogger-import-opensource'), 
-                                       $current, $total_posts, $post_data['title'])
+                                       $current, $total_posts, $title)
                 );
                 BIO_DB_Handler::update_import_progress($progress);
             }
@@ -189,6 +213,36 @@ class BIO_Post_Importer {
         // Fallback to current user
         return get_current_user_id();
     }
+    
+    /**
+     * Fix encoding issues in text, especially for Chinese characters
+     *
+     * @param string $text Text that may have encoding issues
+     * @return string      Properly encoded text
+     */
+    public static function fix_encoding($text) {
+        // If we have a DB handler with encoding fix functionality, use it
+        if (class_exists('BIO_DB_Handler') && method_exists('BIO_DB_Handler', 'ensure_proper_encoding')) {
+            return BIO_DB_Handler::ensure_proper_encoding($text);
+        }
+        
+        // Fallback implementation if the DB handler method isn't available
+        // Fix Unicode escape sequences like u5408u7968 (Chinese characters)
+        if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
+            $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
+                return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
+            }, $text);
+        }
+        
+        // Ensure proper UTF-8 encoding
+        if (function_exists('mb_check_encoding') && !mb_check_encoding($text, 'UTF-8')) {
+            if (function_exists('mb_convert_encoding')) {
+                $text = mb_convert_encoding($text, 'UTF-8', 'auto');
+            }
+        }
+        
+        return $text;
+    }
 }
 
 /**
@@ -244,4 +298,14 @@ function bio_get_author_id($blogger_author) {
     }
     
     return false;
+}
+
+/**
+ * Fix encoding in texts for use in other parts of the plugin
+ *
+ * @param string $text Text to fix encoding issues
+ * @return string      Fixed text
+ */
+function bio_fix_encoding($text) {
+    return BIO_Post_Importer::fix_encoding($text);
 }
