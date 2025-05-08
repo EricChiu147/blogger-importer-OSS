@@ -65,12 +65,16 @@ if (defined('WP_CLI') && WP_CLI) {
          *
          * [--author=<id>]
          * : User ID to use as the author of imported content.
+         * 
+         * [--use-current-user]
+         * : Use current WordPress user as the author for all imported content.
          *
          * ## EXAMPLES
          *
          *     wp blogger-import import /path/to/blogger-export.xml
          *     wp blogger-import import /path/to/blogger-export.xml --skip-media
          *     wp blogger-import import /path/to/blogger-export.xml --map-file=/path/to/mapping.csv
+         *     wp blogger-import import /path/to/blogger-export.xml --use-current-user
          *
          * @param array $args       Command arguments
          * @param array $assoc_args Command associative arguments
@@ -119,18 +123,12 @@ if (defined('WP_CLI') && WP_CLI) {
                 'author_override' => $author_id
             ));
             
-            // Check author exists
-            $author = get_user_by('id', $author_id);
-            if (!$author) {
-                WP_CLI::error('Author not found. User ID: ' . $author_id);
-                return;
-            }
-            
             WP_CLI::log('Starting Blogger import...');
             WP_CLI::log('Parsing XML file: ' . $file_path);
             
-            // Parse XML file
-            $parse_result = bio_parse_blogger_xml($file_path);
+            // Parse XML file using our parser class
+            $parser = new BIO_XML_Parser($file_path);
+            $parse_result = $parser->parse();
             
             if (is_wp_error($parse_result)) {
                 WP_CLI::error('Failed to parse XML: ' . $parse_result->get_error_message());
