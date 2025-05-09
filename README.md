@@ -11,7 +11,7 @@ Users should treat this code as experimental and review it carefully before usin
 
 ## License
 
-This project is licensed under the MIT License. Feel free to make this wordpress plugin better.
+This project is licensed under the MIT License. Feel free for making any changes to make this wordpress plugin better.
 
 ## Goal:
 
