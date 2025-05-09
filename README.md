@@ -12,3 +12,14 @@ Users should treat this code as experimental and review it carefully before usin
 ## License
 
 This project is licensed under the MIT License.
+
+## Goal:
+
+Make an extended version of the default blogger wo wordpress importer.
+
+This importer plugin will:
+
+- Import all posts, pages, and commands into wordpress from a blogger-exported .xml file.
+- Import and save all images locally in the media library. (not tested for videos)
+- Turn the contents in the posts into blocks.
+- Support uft-8 characters. (tested: Chinese contents)
