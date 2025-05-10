@@ -53,7 +53,9 @@ Options:
 ## Initial reason to develop this plugin:
 
 I had a blogger site which contains around 1500 posts in Mandarin and English, and its exported xml is over 20mb, the default blogger importer file size limit.
+
 In addition to the file size limit, the default importer cannot treat Chinese characters properly. Also, it can't convert contents into wordpress Gutenberg Block Editor.
+
 My another important goal was to save the images into the wordpress media library, rather than linking the image to the original blogger site. However, this feature is set to be a premium features in all other blogger importer plugin that I have tried.
 
 None of the current plugins can fulfill my need, or there's a paywall to some specific features that I need, so I decided to make my own one. 
