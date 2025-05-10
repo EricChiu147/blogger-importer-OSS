@@ -11,7 +11,7 @@ if ( ! defined( 'WPINC' ) ) {
 
 class BIO_Block_Converter {
 
-    /* =================== 入口 =================== */
+    /* =================== Entrance =================== */
     public static function convert_to_blocks( $content ) {
 
         $content = function_exists( 'bio_fix_encoding' ) ? bio_fix_encoding( $content ) : $content;
@@ -31,7 +31,7 @@ class BIO_Block_Converter {
         return serialize_blocks( $blocks );
     }
 
-    /* ============== 前置清理 ============== */
+    /* ============== Pre-processing to clean ============== */
     private static function clean_content( $content ) {
 
         $content = preg_replace( '/<div class="blogger-post-footer">.*?<\/div>/s', '', $content );
@@ -42,7 +42,7 @@ class BIO_Block_Converter {
         return $content;
     }
 
-    /* ============== DOM 遍歷 ============== */
+    /* ============== DOM traversal ============== */
     private static function process_node( $node ) {
 
         $blocks = array();
@@ -75,11 +75,11 @@ class BIO_Block_Converter {
                         }
                         break;
 
-                    /* 行內元素整行 → 段落 */
+                    /* in-line elements → paragraph block */
                     case 'b': case 'strong':
                     case 'i': case 'em':
                     case 'u': case 'span':
-                        // 取「含自身」HTML，保留 <strong> 等標籤
+                        // Obtain its own html, and keep tags like <strong>
                         $html  = self::replace_inline_tags( self::get_outer_html( $child ) );
                         $html  = wp_kses_post( $html );
                         $align = self::detect_align( $child );
@@ -106,9 +106,9 @@ class BIO_Block_Converter {
                     /* ---- Others ---- */
                     case 'a':
                         if ( $img_block = self::maybe_image_block_from_anchor( $child ) ) {
-                            $blocks[] = $img_block;          // → 圖片區塊（依判定決定是否保留連結）
+                            $blocks[] = $img_block;          // → image blocks (decide whether to keep link base on maybe_image_block_from_anchor())
                         } else {
-                            /* 原來的段落包 <a> 邏輯 */
+                            /* Put <a> out of the content */
                             $html  = self::replace_inline_tags( self::get_outer_html( $child ) );
                             $html  = wp_kses_post( $html );
                             $align = self::detect_align( $child );
@@ -169,7 +169,7 @@ class BIO_Block_Converter {
         return $blocks;
     }
 
-    /* ============== 區塊建構器 ============== */
+    /* ============== Block Builder ============== */
 
     /* ---- Heading ---- */
     private static function create_heading_block( $node ) {
@@ -217,7 +217,7 @@ class BIO_Block_Converter {
 
         $html  = self::replace_inline_tags( self::get_inner_html( $node ) );
         $html  = wp_kses_post( $html );
-        $align = self::detect_align( $node );      // ★ 取對齊
+        $align = self::detect_align( $node );      // ★ take alignment settings
         $attrs = array();
         if ( $align ) { $attrs['align'] = $align; }
     
@@ -232,23 +232,23 @@ class BIO_Block_Converter {
     
 
     /**
-     * 若 <p> 只包含 1 張圖片（可被 <a> 包住），就轉成 image block
-     * 否則回傳 false
+     * If <p> only contains one image (can be wrapped by <a>), convert it to image block.
+     * Or else, return false
      */
     private static function maybe_image_block_from_p( $p ) {
 
-        /* --- 0. 不能有非 <a>/<img>/<br> 以外的元素 --- */
+        /* --- 0. It cannot have elements other than <a>/<img>/<br> --- */
         foreach ( $p->childNodes as $c ) {
             if ( $c->nodeType === XML_ELEMENT_NODE &&
                 ! in_array( $c->nodeName, array( 'a', 'img', 'br' ), true ) ) {
                 return false;
             }
             if ( $c->nodeType === XML_TEXT_NODE && trim( $c->nodeValue ) !== '' ) {
-                return false;        // 有文字就當普通段落
+                return false;        // If there's any text, treat it as a paragraph
             }
         }
 
-        /* --- 1. 取圖片節點（可能被 <a> 包住） --- */
+        /* --- 1. Get the image node (possibally wrapped by <a>) --- */
         $img = $p->getElementsByTagName( 'img' )->item( 0 );
         if ( ! $img ) {
             return false;
@@ -259,24 +259,14 @@ class BIO_Block_Converter {
         }
         $alt = $img->getAttribute( 'alt' ) ?: '';
 
-        /* --- 2. 判斷置中 / 置右 --- */
+        /* --- 2. Determin alignment --- */
         $align = self::detect_align( $p );   // 會向上追溯 <div style="text-align:…">
 
-        /* --- 3. 回傳 image block --- */
+        /* --- 3. Return an image block --- */
         return self::build_image_block( $src, $alt, '', $align );
     }
 
-
-    /* ---- List / Quote / Code / Image / Table / Embed
-       (略，與前版相同，請保持原樣)… ---- */
-    /*  …保留前一版 create_list_block、create_quote_block、
-         create_code_block、maybe_image_block_from_table、
-         create_table_block、process_figure、create_embed_block、
-         build_image_block、get_inner_html 函式 …  */
-    /* ================= 其餘函式維持前版內容 ================= */
-
     private static function create_list_block( $node, $ordered ) {
-        // 與前版相同…
         $tag          = $ordered ? 'ol' : 'ul';
         $inner_blocks = array();
         foreach ( $node->getElementsByTagName( 'li' ) as $li ) {
@@ -317,7 +307,6 @@ class BIO_Block_Converter {
     }
 
     private static function maybe_image_block_from_table( $table ) {
-        // 與前版相同…
         $rows = $table->getElementsByTagName( 'tr' );
         if ( $rows->length !== 2 ) { return false; }
         $img = $rows->item( 0 )->getElementsByTagName( 'img' )->item( 0 );
@@ -387,17 +376,17 @@ class BIO_Block_Converter {
         );
     }
 
-    /* ============== 共用工具 ============== */
+    /* ============== Shared common tools ============== */
     /**
-     * 組 core/image 區塊  
-     * — 可決定是否保留超連結  
+     * Build core/image blocks  
+     * — whether to keep the link is decided by $link_dest  
      *
-     * @param string $src       圖片 URL（已是本地主機）
-     * @param string $alt       alt 文字
-     * @param string $caption   figcaption 文字（允許空）
+     * @param string $src       image URL (already in local server)
+     * @param string $alt       alt text
+     * @param string $caption   figcaption text (optional)
      * @param string $align     '', 'center', 'right', 'left'
-     * @param string $link_dest 'none' | 'custom'   ← 若是外部連結就傳 custom
-     * @param string $href      link_dest = 'custom' 時要帶的網址
+     * @param string $link_dest 'none' | 'custom'   ← If it is outer link then return custom
+     * @param string $href      link_dest = link destination for 'custom' 
      * @return array            Gutenberg block array
      */
     private static function build_image_block(
@@ -405,9 +394,9 @@ class BIO_Block_Converter {
         $link_dest = 'none', $href = ''
     ) {
 
-        /* --------- 1. 取附件 ID（若有） --------- */
+        /* --------- 1. Get attachment ID (if available) --------- */
         $id        = attachment_url_to_postid( $src );
-        $size_slug = 'full';              // 這裡固定 full；可視情況取實際尺寸
+        $size_slug = 'full';              // Fixed full; can be changed depending on the needs
         $img_class = $id ? 'wp-image-' . $id : '';
         $fig_class = 'wp-block-image' .
                     ( $align     ? ' align' . $align       : '' ) .
@@ -418,7 +407,7 @@ class BIO_Block_Converter {
                 . ( $img_class ? ' class="' . esc_attr( $img_class ) . '"' : '' )
                 . '/>';
 
-        // 若 linkDestination 設 custom，將 <img> 包 <a>
+        // If linkDestination is set to custom, wrap <img> by <a>
         if ( $link_dest === 'custom' && $href ) {
             $img_tag = '<a href="' . esc_url( $href ) . '">' . $img_tag . '</a>';
         }
@@ -438,19 +427,19 @@ class BIO_Block_Converter {
             'className'       => trim( 'wp-block-image' . ( $align ? ' align' . $align : '' ) ),
         );
 
-        // 有附件 ID 優先用 id，否則記錄 url
+        // If there's an ID, prioritize using id, or else recored the url
         if ( $id ) {
             $attrs['id']  = $id;
         } else {
             $attrs['url'] = $src;
         }
 
-        // 保留自訂連結網址
+        // Keep custom link if $link_dest is set to custom
         if ( $link_dest === 'custom' && $href ) {
             $attrs['href'] = $href;
         }
 
-        /* --------- 4. 回傳區塊 --------- */
+        /* --------- 4. Return the block --------- */
         return array(
             'blockName'    => 'core/image',
             'attrs'        => $attrs,
@@ -472,8 +461,8 @@ class BIO_Block_Converter {
     }
 
     /**
-     * 由自己往父節點找 text-align / align 屬性
-     * 回傳 '', 'center', 'right', 'left'
+     * Find attributes such as text-align / align from its parent nodes
+     * Return '', 'center', 'right', 'left'
      */
     private static function detect_align( $node ) {
         for ( $n = $node; $n && $n->nodeType === XML_ELEMENT_NODE; $n = $n->parentNode ) {
@@ -501,7 +490,7 @@ class BIO_Block_Converter {
 
 
     /**
-     * 回傳包含自身標籤的 HTML（DOMDocument 沒有現成方法，只能手動包）
+     * Return an HTML tag that includes itself
      */
     private static function get_outer_html( $node ) {
         $doc = $node->ownerDocument;
@@ -509,7 +498,7 @@ class BIO_Block_Converter {
     }
 
     /**
-     * 由 Blogger 原圖網址判定「點圖開原尺寸」
+     * Determin if this image link refers to "click to enlarge the image" by Blogger image hosts
      */
     private static function is_blogger_original_img( $href ) {
         if ( ! $href ) return false;
@@ -526,14 +515,14 @@ class BIO_Block_Converter {
     }
 
     /**
-     * <a><img></a> → image block（決定是否保留連結）
+     * <a><img></a> → image block (decide whether to keep link)
      */
     private static function maybe_image_block_from_anchor( $a ) {
 
         $img = $a->getElementsByTagName( 'img' )->item( 0 );
         if ( ! $img ) return false;
 
-        // 段落內不能含其他文字
+        // No text node in <a> (only <img>)
         if ( trim( $a->textContent ) !== $img->textContent ) return false;
 
         $src   = $img->getAttribute( 'src' );
@@ -542,7 +531,7 @@ class BIO_Block_Converter {
         $href  = $a->getAttribute( 'href' );
         $align = self::detect_align( $a );
 
-        /* 判斷是否保留 href */
+        /* Determin whether to keep href */
         if ( $href && ! self::is_blogger_original_img( $href ) ) {
             return self::build_image_block( $src, $alt, '', $align, 'custom', $href );
         }
@@ -553,10 +542,10 @@ class BIO_Block_Converter {
 }
 
 /**
- * 外部呼叫入口
+ * Call entrance function to convert HTML to Gutenberg blocks
  *
  * @param  string $content HTML
- * @return string          Gutenberg 序列化內容
+ * @return string          Gutenberg Serialized blocks
  */
 function bio_convert_to_blocks( $content ) {
     return BIO_Block_Converter::convert_to_blocks( $content );
