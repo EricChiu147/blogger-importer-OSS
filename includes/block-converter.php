@@ -105,18 +105,22 @@ class BIO_Block_Converter {
 
                     /* ---- Others ---- */
                     case 'a':
-                        $html  = self::replace_inline_tags( self::get_outer_html( $child ) );
-                        $html  = wp_kses_post( $html );
-                        $align = self::detect_align( $child );
-                        $attrs = $align ? array( 'align' => $align ) : array();
-                    
-                        $blocks[] = array(
-                            'blockName'    => 'core/paragraph',
-                            'attrs'        => $attrs,
-                            'innerBlocks'  => array(),
-                            'innerHTML'    => '<p>' . $html . '</p>',
-                            'innerContent' => array( $html ),
-                        );
+                        if ( $img_block = self::maybe_image_block_from_anchor( $child ) ) {
+                            $blocks[] = $img_block;          // → 圖片區塊（依判定決定是否保留連結）
+                        } else {
+                            /* 原來的段落包 <a> 邏輯 */
+                            $html  = self::replace_inline_tags( self::get_outer_html( $child ) );
+                            $html  = wp_kses_post( $html );
+                            $align = self::detect_align( $child );
+                            $attrs = $align ? array( 'align' => $align ) : array();
+                            $blocks[] = array(
+                                'blockName'    => 'core/paragraph',
+                                'attrs'        => $attrs,
+                                'innerBlocks'  => array(),
+                                'innerHTML'    => '<p>' . $html . '</p>',
+                                'innerContent' => array( $html ),
+                            );
+                        }
                         break;
                     
                     case 'blockquote':
@@ -385,28 +389,41 @@ class BIO_Block_Converter {
 
     /* ============== 共用工具 ============== */
     /**
-     * 組 core/image 區塊
+     * 組 core/image 區塊  
+     * — 可決定是否保留超連結  
      *
-     * @param string $src      圖片 URL
-     * @param string $alt      alt 文字
-     * @param string $caption  figcaption 文字 (允許空)
-     * @param string $align    '', 'center', 'left', 'right'…
-     * @return array           Gutenberg block array
+     * @param string $src       圖片 URL（已是本地主機）
+     * @param string $alt       alt 文字
+     * @param string $caption   figcaption 文字（允許空）
+     * @param string $align     '', 'center', 'right', 'left'
+     * @param string $link_dest 'none' | 'custom'   ← 若是外部連結就傳 custom
+     * @param string $href      link_dest = 'custom' 時要帶的網址
+     * @return array            Gutenberg block array
      */
-    private static function build_image_block( $src, $alt, $caption, $align ) {
+    private static function build_image_block(
+        $src, $alt, $caption, $align,
+        $link_dest = 'none', $href = ''
+    ) {
 
         /* --------- 1. 取附件 ID（若有） --------- */
         $id        = attachment_url_to_postid( $src );
-        $size_slug = 'full';             // 這裡固定 full；要偵測實際尺寸可再加判斷
+        $size_slug = 'full';              // 這裡固定 full；可視情況取實際尺寸
         $img_class = $id ? 'wp-image-' . $id : '';
-        $fig_class = 'wp-block-image' . ( $align ? ' align' . $align : '' ) .
-                    ( $size_slug ? ' size-' . $size_slug : '' );
+        $fig_class = 'wp-block-image' .
+                    ( $align     ? ' align' . $align       : '' ) .
+                    ( $size_slug ? ' size-' . $size_slug   : '' );
 
         /* --------- 2. figure / img / caption HTML --------- */
-        $html  = '<figure class="' . esc_attr( $fig_class ) . '">';
-        $html .= '<img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"'
-            .  ( $img_class ? ' class="' . esc_attr( $img_class ) . '"' : '' )
-            .  '/>';
+        $img_tag  = '<img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"'
+                . ( $img_class ? ' class="' . esc_attr( $img_class ) . '"' : '' )
+                . '/>';
+
+        // 若 linkDestination 設 custom，將 <img> 包 <a>
+        if ( $link_dest === 'custom' && $href ) {
+            $img_tag = '<a href="' . esc_url( $href ) . '">' . $img_tag . '</a>';
+        }
+
+        $html  = '<figure class="' . esc_attr( $fig_class ) . '">' . $img_tag;
         if ( $caption !== '' ) {
             $html .= '<figcaption class="wp-element-caption"><strong>' .
                     wp_kses_post( $caption ) . '</strong></figcaption>';
@@ -416,18 +433,22 @@ class BIO_Block_Converter {
         /* --------- 3. block attrs --------- */
         $attrs = array(
             'sizeSlug'        => $size_slug,
-            'linkDestination' => 'none',
+            'linkDestination' => $link_dest,      // 'none' 或 'custom'
+            'align'           => $align ?: 'none',
+            'className'       => trim( 'wp-block-image' . ( $align ? ' align' . $align : '' ) ),
         );
+
+        // 有附件 ID 優先用 id，否則記錄 url
         if ( $id ) {
-            $attrs['id'] = $id;
+            $attrs['id']  = $id;
         } else {
             $attrs['url'] = $src;
         }
-        if ( $align ) {
-            $attrs['align'] = $align;
+
+        // 保留自訂連結網址
+        if ( $link_dest === 'custom' && $href ) {
+            $attrs['href'] = $href;
         }
-        // className（讓 block JSON 與 figure class 一致）
-        $attrs['className'] = trim( 'wp-block-image' . ( $align ? ' align' . $align : '' ) );
 
         /* --------- 4. 回傳區塊 --------- */
         return array(
@@ -438,6 +459,7 @@ class BIO_Block_Converter {
             'innerContent' => array( $html ),
         );
     }
+
 
 
     private static function get_inner_html( $node ) {
@@ -485,6 +507,49 @@ class BIO_Block_Converter {
         $doc = $node->ownerDocument;
         return $doc->saveHTML( $node );
     }
+
+    /**
+     * 由 Blogger 原圖網址判定「點圖開原尺寸」
+     */
+    private static function is_blogger_original_img( $href ) {
+        if ( ! $href ) return false;
+        $u = wp_parse_url( $href );
+        if ( empty( $u['host'] ) ) return false;
+
+        $hosts = array(
+            'blogger.googleusercontent.com',
+            '1.bp.blogspot.com', '2.bp.blogspot.com',
+            '3.bp.blogspot.com', '4.bp.blogspot.com',
+        );
+        return in_array( $u['host'], $hosts, true ) &&
+            preg_match( '~/s\d{2,4}/~', $u['path'] );
+    }
+
+    /**
+     * <a><img></a> → image block（決定是否保留連結）
+     */
+    private static function maybe_image_block_from_anchor( $a ) {
+
+        $img = $a->getElementsByTagName( 'img' )->item( 0 );
+        if ( ! $img ) return false;
+
+        // 段落內不能含其他文字
+        if ( trim( $a->textContent ) !== $img->textContent ) return false;
+
+        $src   = $img->getAttribute( 'src' );
+        if ( ! $src ) return false;
+        $alt   = $img->getAttribute( 'alt' ) ?: '';
+        $href  = $a->getAttribute( 'href' );
+        $align = self::detect_align( $a );
+
+        /* 判斷是否保留 href */
+        if ( $href && ! self::is_blogger_original_img( $href ) ) {
+            return self::build_image_block( $src, $alt, '', $align, 'custom', $href );
+        }
+        return self::build_image_block( $src, $alt, '', $align, 'none' );
+    }
+
+
 }
 
 /**
