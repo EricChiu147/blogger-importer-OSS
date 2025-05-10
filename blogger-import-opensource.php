@@ -47,12 +47,6 @@ add_filter('the_content', 'bio_fix_encoding', 20); // Priority 20 to run after o
 add_filter('the_title', 'bio_fix_encoding', 20);
 add_filter('the_excerpt', 'bio_fix_encoding', 20);
 
-// Add support for additional mime types
-add_filter('upload_mimes', 'bio_add_mime_types');
-function bio_add_mime_types($mimes) {
-    $mimes['webp'] = 'image/webp';
-    return $mimes;
-}
 
 // Include CLI command if WP-CLI is available
 if (defined('WP_CLI') && WP_CLI) {

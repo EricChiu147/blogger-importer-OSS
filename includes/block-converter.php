@@ -19,11 +19,11 @@ class BIO_Block_Converter {
     /**
      * Convert HTML content to Gutenberg blocks
      *
-     * This modification ensures proper UTF-8 character handling
-     * throughout the block conversion process.
+     * This function converts regular HTML to Gutenberg serialized block format
+     * with proper block comments for editor compatibility.
      *
      * @param string $content HTML content
-     * @return string         Content in blocks format
+     * @return string         Serialized Gutenberg blocks content
      */
     public static function convert_to_blocks($content) {
         // Apply fix_encoding before conversion
@@ -35,8 +35,15 @@ class BIO_Block_Converter {
         // Clean up the content
         $content = self::clean_content($content);
         
-        // Initialize blocks array
-        $blocks = array();
+        // If the content is empty, return empty
+        if (empty(trim($content))) {
+            return '';
+        }
+        
+        // If the content doesn't have HTML tags, just return a simple paragraph block
+        if (strpos($content, '<') === false || strpos($content, '>') === false) {
+            return '<!-- wp:paragraph --><p>' . $content . '</p><!-- /wp:paragraph -->';
+        }
         
         // Split content by HTML tags
         $dom = new DOMDocument();
@@ -45,7 +52,7 @@ class BIO_Block_Converter {
         libxml_use_internal_errors(true);
         
         // Load HTML with UTF-8 encoding
-        $dom->loadHTML('<?xml encoding="utf-8"?>' . $content);
+        $dom->loadHTML('<?xml encoding="utf-8"?><div>' . $content . '</div>');
         
         // Clear errors
         libxml_clear_errors();
@@ -53,25 +60,28 @@ class BIO_Block_Converter {
         // Process the DOM
         $body = $dom->getElementsByTagName('body')->item(0);
         
+        // Initialize the output
+        $output = '';
+        
         if ($body) {
-            $blocks = self::process_node($body);
+            // Process body children
+            foreach ($body->childNodes as $child) {
+                if ($child->nodeType === XML_ELEMENT_NODE && $child->nodeName === 'div') {
+                    // Process the main container div's children
+                    foreach ($child->childNodes as $contentNode) {
+                        $output .= self::process_node_to_block($contentNode);
+                    }
+                }
+            }
         } else {
             // Fallback if DOM parsing failed
-            $blocks[] = self::create_paragraph_block($content);
+            $output = '<!-- wp:paragraph --><p>' . esc_html($content) . '</p><!-- /wp:paragraph -->';
         }
         
-        // Allow filtering of blocks after conversion
-        $blocks = apply_filters('bio_post_convert_to_blocks', $blocks, $content);
+        // Allow filtering of content after conversion
+        $output = apply_filters('bio_post_convert_to_blocks', $output, $content);
         
-        // Convert blocks array to JSON string with UTF-8 encoding preserved
-        $blocks_json = wp_json_encode($blocks, JSON_UNESCAPED_UNICODE);
-        
-        // Additional safety check - fix any encoding issues that might have been introduced
-        if (function_exists('bio_fix_encoding')) {
-            $blocks_json = bio_fix_encoding($blocks_json);
-        }
-        
-        return $blocks_json;
+        return $output;
     }
     
     /**
@@ -95,111 +105,106 @@ class BIO_Block_Converter {
     }
     
     /**
-     * Process a DOM node recursively
+     * Process a DOM node to Gutenberg block
      *
      * @param DOMNode $node DOM node
-     * @return array        Blocks
+     * @return string       Serialized block markup
      */
-    private static function process_node($node) {
-        $blocks = array();
-        
-        foreach ($node->childNodes as $child) {
-            if ($child->nodeType === XML_TEXT_NODE) {
-                // Text content
-                $text = trim($child->nodeValue);
-                if (!empty($text)) {
-                    $blocks[] = self::create_paragraph_block($text);
-                }
-            } elseif ($child->nodeType === XML_ELEMENT_NODE) {
-                // Element node
-                switch ($child->nodeName) {
-                    case 'h1':
-                    case 'h2':
-                    case 'h3':
-                    case 'h4':
-                    case 'h5':
-                    case 'h6':
-                        $blocks[] = self::create_heading_block($child);
-                        break;
-                        
-                    case 'p':
-                        $blocks[] = self::create_paragraph_block_from_node($child);
-                        break;
-                        
-                    case 'ul':
-                        $blocks[] = self::create_list_block($child, 'unordered');
-                        break;
-                        
-                    case 'ol':
-                        $blocks[] = self::create_list_block($child, 'ordered');
-                        break;
-                        
-                    case 'blockquote':
-                        $blocks[] = self::create_quote_block($child);
-                        break;
-                        
-                    case 'img':
-                        $block = self::create_image_block($child);
-                        if ($block) {
-                            $blocks[] = $block;
-                        }
-                        break;
-                        
-                    case 'pre':
-                        $blocks[] = self::create_code_block($child);
-                        break;
-                        
-                    case 'table':
-                        $blocks[] = self::create_table_block($child);
-                        break;
-                        
-                    case 'figure':
-                        $figureBlocks = self::process_figure($child);
-                        $blocks = array_merge($blocks, $figureBlocks);
-                        break;
-                        
-                    case 'iframe':
-                        $block = self::create_embed_block($child);
-                        if ($block) {
-                            $blocks[] = $block;
-                        }
-                        break;
-                        
-                    case 'div':
-                        // Process div content recursively
-                        $div_blocks = self::process_node($child);
-                        $blocks = array_merge($blocks, $div_blocks);
-                        break;
-                        
-                    default:
-                        // For other elements, process children recursively
-                        $child_blocks = self::process_node($child);
-                        $blocks = array_merge($blocks, $child_blocks);
-                        break;
-                }
+    private static function process_node_to_block($node) {
+        // Ignore whitespace text nodes
+        if ($node->nodeType === XML_TEXT_NODE) {
+            $text = trim($node->nodeValue);
+            if (empty($text)) {
+                return '';
             }
+            return self::create_paragraph_block($text);
         }
         
-        return $blocks;
+        if ($node->nodeType !== XML_ELEMENT_NODE) {
+            return '';
+        }
+        
+        // Process element based on its tag name
+        switch ($node->nodeName) {
+            case 'h1':
+            case 'h2':
+            case 'h3':
+            case 'h4':
+            case 'h5':
+            case 'h6':
+                return self::create_heading_block($node);
+            
+            case 'p':
+                return self::create_paragraph_block_from_node($node);
+            
+            case 'ul':
+                return self::create_list_block($node, false);
+            
+            case 'ol':
+                return self::create_list_block($node, true);
+            
+            case 'blockquote':
+                return self::create_quote_block($node);
+            
+            case 'img':
+                return self::create_image_block($node);
+            
+            case 'pre':
+                return self::create_code_block($node);
+            
+            case 'table':
+                return self::create_table_block($node);
+            
+            case 'figure':
+                return self::process_figure($node);
+            
+            case 'iframe':
+                return self::create_embed_block($node);
+            
+            case 'div':
+                // Process div content
+                $output = '';
+                foreach ($node->childNodes as $child) {
+                    $output .= self::process_node_to_block($child);
+                }
+                return $output;
+            
+            default:
+                // For other elements, check if they have children
+                if ($node->hasChildNodes()) {
+                    $output = '';
+                    foreach ($node->childNodes as $child) {
+                        $output .= self::process_node_to_block($child);
+                    }
+                    return $output;
+                }
+                
+                // For empty elements or elements with only text, create a paragraph
+                $text = trim($node->textContent);
+                if (!empty($text)) {
+                    return self::create_paragraph_block($text);
+                }
+                
+                return '';
+        }
     }
     
     /**
      * Create a heading block
      *
      * @param DOMNode $node Heading node
-     * @return array        Heading block
+     * @return string       Serialized heading block
      */
     private static function create_heading_block($node) {
         $level = (int) substr($node->nodeName, 1);
+        $content = esc_html($node->textContent);
         
-        return array(
-            'blockName' => 'core/heading',
-            'attrs' => array(
-                'level' => $level
-            ),
-            'innerBlocks' => array(),
-            'innerHTML' => $node->nodeValue,
-            'innerContent' => array($node->nodeValue)
+        return sprintf(
+            '<!-- wp:heading {"level":%d} --><h%d>%s</h%d><!-- /wp:heading -->',
+            $level,
+            $level,
+            $content,
+            $level
         );
     }
     
@@ -207,15 +212,12 @@ class BIO_Block_Converter {
      * Create a paragraph block from text
      *
      * @param string $text Text content
-     * @return array       Paragraph block
+     * @return string      Serialized paragraph block
      */
     private static function create_paragraph_block($text) {
-        return array(
-            'blockName' => 'core/paragraph',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<p>' . $text . '</p>',
-            'innerContent' => array('<p>' . $text . '</p>')
+        return sprintf(
+            '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->',
+            $text
         );
     }
     
@@ -223,58 +225,46 @@ class BIO_Block_Converter {
      * Create a paragraph block from a node
      *
      * @param DOMNode $node Paragraph node
-     * @return array        Paragraph block
+     * @return string       Serialized paragraph block
      */
     private static function create_paragraph_block_from_node($node) {
         // Get the HTML content of the paragraph
         $html = self::get_inner_html($node);
         
-        return array(
-            'blockName' => 'core/paragraph',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<p>' . $html . '</p>',
-            'innerContent' => array('<p>' . $html . '</p>')
+        return sprintf(
+            '<!-- wp:paragraph --><p>%s</p><!-- /wp:paragraph -->',
+            $html
         );
     }
     
     /**
      * Create a list block
      *
-     * @param DOMNode $node List node
-     * @param string  $type List type (ordered/unordered)
-     * @return array        List block
+     * @param DOMNode $node    List node
+     * @param bool    $ordered Whether it's an ordered list
+     * @return string          Serialized list block
      */
-    private static function create_list_block($node, $type) {
-        // Get the HTML content of the list
-        $html = self::get_inner_html($node);
-        
-        $block_type = $type === 'ordered' ? 'core/list-item' : 'core/list';
-        
-        // Create inner blocks for each list item
-        $inner_blocks = array();
-        
+    private static function create_list_block($node, $ordered) {
+        $items = array();
         $list_items = $node->getElementsByTagName('li');
+        
         foreach ($list_items as $item) {
-            $inner_blocks[] = array(
-                'blockName' => 'core/list-item',
-                'attrs' => array(),
-                'innerBlocks' => array(),
-                'innerHTML' => $item->nodeValue,
-                'innerContent' => array($item->nodeValue)
-            );
+            $items[] = trim($item->textContent);
         }
         
-        $tag = $type === 'ordered' ? 'ol' : 'ul';
+        $block_name = $ordered ? 'wp:list {"ordered":true}' : 'wp:list';
+        $tag = $ordered ? 'ol' : 'ul';
+        $list_items_html = '';
         
-        return array(
-            'blockName' => $block_type,
-            'attrs' => array(
-                'ordered' => $type === 'ordered'
-            ),
-            'innerBlocks' => $inner_blocks,
-            'innerHTML' => '<' . $tag . '>' . $html . '</' . $tag . '>',
-            'innerContent' => array('<' . $tag . '>', null, '</' . $tag . '>')
+        foreach ($items as $item) {
+            $list_items_html .= sprintf('<li>%s</li>', $item);
+        }
+        
+        return sprintf(
+            '<!-- %s --><ul>%s</ul><!-- /%s -->',
+            $block_name,
+            $list_items_html,
+            'wp:list'
         );
     }
     
@@ -282,18 +272,19 @@ class BIO_Block_Converter {
      * Create a quote block
      *
      * @param DOMNode $node Quote node
-     * @return array        Quote block
+     * @return string       Serialized quote block
      */
     private static function create_quote_block($node) {
         // Get the HTML content of the quote
-        $html = self::get_inner_html($node);
+        $html = trim($node->textContent);
         
-        return array(
-            'blockName' => 'core/quote',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<blockquote>' . $html . '</blockquote>',
-            'innerContent' => array('<blockquote>' . $html . '</blockquote>')
+        if (empty($html)) {
+            return '';
+        }
+        
+        return sprintf(
+            '<!-- wp:quote --><blockquote class="wp-block-quote"><p>%s</p></blockquote><!-- /wp:quote -->',
+            $html
         );
     }
     
@@ -301,13 +292,13 @@ class BIO_Block_Converter {
      * Create an image block
      *
      * @param DOMNode $node Image node
-     * @return array|false  Image block or false if not valid
+     * @return string       Serialized image block
      */
     private static function create_image_block($node) {
         $src = $node->getAttribute('src');
         
         if (empty($src)) {
-            return false;
+            return '';
         }
         
         $alt = $node->getAttribute('alt') ?: '';
@@ -318,47 +309,43 @@ class BIO_Block_Converter {
         if ($parent && $parent->nodeName === 'figure') {
             $captions = $parent->getElementsByTagName('figcaption');
             if ($captions->length > 0) {
-                $caption = $captions->item(0)->nodeValue;
+                $caption = trim($captions->item(0)->textContent);
             }
         }
         
-        $block = array(
-            'blockName' => 'core/image',
-            'attrs' => array(
-                'url' => $src,
-                'alt' => $alt,
-            ),
-            'innerBlocks' => array(),
-            'innerHTML' => '<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/></figure>',
-            'innerContent' => array('<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/></figure>')
-        );
-        
-        // Add caption if exists
         if (!empty($caption)) {
-            $block['attrs']['caption'] = $caption;
-            $block['innerHTML'] = '<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/><figcaption>' . $caption . '</figcaption></figure>';
-            $block['innerContent'] = array('<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/><figcaption>' . $caption . '</figcaption></figure>');
+            return sprintf(
+                '<!-- wp:image {"id":"","sizeSlug":"large"} --><figure class="wp-block-image size-large"><img src="%s" alt="%s"/><figcaption>%s</figcaption></figure><!-- /wp:image -->',
+                esc_url($src),
+                esc_attr($alt),
+                esc_html($caption)
+            );
+        } else {
+            return sprintf(
+                '<!-- wp:image {"id":"","sizeSlug":"large"} --><figure class="wp-block-image size-large"><img src="%s" alt="%s"/></figure><!-- /wp:image -->',
+                esc_url($src),
+                esc_attr($alt)
+            );
         }
-        
-        return $block;
     }
     
     /**
      * Create a code block
      *
      * @param DOMNode $node Code node
-     * @return array        Code block
+     * @return string       Serialized code block
      */
     private static function create_code_block($node) {
         // Get the text content
-        $code = $node->textContent;
+        $code = trim($node->textContent);
         
-        return array(
-            'blockName' => 'core/code',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<pre><code>' . esc_html($code) . '</code></pre>',
-            'innerContent' => array('<pre><code>' . esc_html($code) . '</code></pre>')
+        if (empty($code)) {
+            return '';
+        }
+        
+        return sprintf(
+            '<!-- wp:code --><pre class="wp-block-code"><code>%s</code></pre><!-- /wp:code -->',
+            esc_html($code)
         );
     }
     
@@ -366,18 +353,19 @@ class BIO_Block_Converter {
      * Create a table block
      *
      * @param DOMNode $node Table node
-     * @return array        Table block
+     * @return string       Serialized table block
      */
     private static function create_table_block($node) {
         // Get the HTML content of the table
         $html = self::get_inner_html($node);
         
-        return array(
-            'blockName' => 'core/table',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<figure class="wp-block-table"><table>' . $html . '</table></figure>',
-            'innerContent' => array('<figure class="wp-block-table"><table>' . $html . '</table></figure>')
+        if (empty($html)) {
+            return '';
+        }
+        
+        return sprintf(
+            '<!-- wp:table --><figure class="wp-block-table"><table>%s</table></figure><!-- /wp:table -->',
+            $html
         );
     }
     
@@ -385,68 +373,69 @@ class BIO_Block_Converter {
      * Process a figure element
      *
      * @param DOMNode $node Figure node
-     * @return array        Blocks
+     * @return string       Serialized block
      */
     private static function process_figure($node) {
-        $blocks = array();
-        
         // Check for image
         $images = $node->getElementsByTagName('img');
         if ($images->length > 0) {
-            $blocks[] = self::create_image_block($images->item(0));
-            return $blocks;
+            return self::create_image_block($images->item(0));
         }
         
         // Check for iframe (embed)
         $iframes = $node->getElementsByTagName('iframe');
         if ($iframes->length > 0) {
-            $block = self::create_embed_block($iframes->item(0));
-            if ($block) {
-                $blocks[] = $block;
-            }
-            return $blocks;
+            return self::create_embed_block($iframes->item(0));
         }
         
         // Process as generic content
-        return self::process_node($node);
+        $output = '';
+        foreach ($node->childNodes as $child) {
+            $output .= self::process_node_to_block($child);
+        }
+        return $output;
     }
     
     /**
      * Create an embed block
      *
      * @param DOMNode $node Iframe node
-     * @return array|false  Embed block or false if not valid
+     * @return string       Serialized embed block
      */
     private static function create_embed_block($node) {
         $src = $node->getAttribute('src');
         
         if (empty($src)) {
-            return false;
+            return '';
         }
         
         // Determine provider based on URL
         $provider = '';
+        $providerNameSlug = '';
         
         if (strpos($src, 'youtube.com') !== false || strpos($src, 'youtu.be') !== false) {
-            $provider = 'youtube';
+            $provider = 'YouTube';
+            $providerNameSlug = 'youtube';
         } elseif (strpos($src, 'vimeo.com') !== false) {
-            $provider = 'vimeo';
+            $provider = 'Vimeo';
+            $providerNameSlug = 'vimeo';
         }
         
-        $block_name = !empty($provider) ? 'core-embed/' . $provider : 'core/embed';
-        
-        return array(
-            'blockName' => $block_name,
-            'attrs' => array(
-                'url' => $src,
-                'providerNameSlug' => $provider,
-                'type' => 'rich',
-                'responsive' => true
-            ),
-            'innerBlocks' => array(),
-            'innerHTML' => '<figure class="wp-block-embed-' . esc_attr($provider) . ' wp-block-embed is-type-rich is-provider-' . esc_attr($provider) . '"><div class="wp-block-embed__wrapper">' . $src . '</div></figure>',
-            'innerContent' => array('<figure class="wp-block-embed-' . esc_attr($provider) . ' wp-block-embed is-type-rich is-provider-' . esc_attr($provider) . '"><div class="wp-block-embed__wrapper">' . $src . '</div></figure>')
-        );
+        if (!empty($provider)) {
+            return sprintf(
+                '<!-- wp:embed {"url":"%s","type":"rich","providerNameSlug":"%s","responsive":true} --><figure class="wp-block-embed is-type-rich is-provider-%s wp-block-embed-wordpress wp-embed-aspect-16-9 wp-has-aspect-ratio"><div class="wp-block-embed__wrapper">%s</div></figure><!-- /wp:embed -->',
+                esc_url($src),
+                $providerNameSlug,
+                $providerNameSlug,
+                esc_url($src)
+            );
+        } else {
+            return sprintf(
+                '<!-- wp:embed {"url":"%s"} --><figure class="wp-block-embed"><div class="wp-block-embed__wrapper">%s</div></figure><!-- /wp:embed -->',
+                esc_url($src),
+                esc_url($src)
+            );
+        }
     }
     
     /**
@@ -471,7 +460,7 @@ class BIO_Block_Converter {
  * Convert HTML content to Gutenberg blocks
  *
  * @param string $content HTML content
- * @return string         JSON string of blocks
+ * @return string         Serialized Gutenberg blocks
  */
 function bio_convert_to_blocks($content) {
     return BIO_Block_Converter::convert_to_blocks($content);
