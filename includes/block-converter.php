@@ -92,6 +92,10 @@ class BIO_Block_Converter {
                         break;
 
                     /* ---- Others ---- */
+                    case 'a':
+                        // 單獨出現的超連結整行視為段落
+                        $blocks[] = self::create_paragraph_block_from_node( $child );
+                        break;
                     case 'blockquote':
                         $blocks[] = self::create_quote_block( $child );
                         break;
@@ -165,33 +169,40 @@ class BIO_Block_Converter {
         );
     }
 
-    private static function create_paragraph_block( $text ) {
+    private static function create_paragraph_block( $text, $align = '' ) {
 
-        $text = self::replace_inline_tags( $text );
-        $text = wp_kses_post( $text );
-
+        $text  = self::replace_inline_tags( $text );
+        $text  = wp_kses_post( $text );
+        $attrs = array();
+        if ( $align ) { $attrs['align'] = $align; }
+    
         return array(
             'blockName'    => 'core/paragraph',
-            'attrs'        => array(),
+            'attrs'        => $attrs,
             'innerBlocks'  => array(),
             'innerHTML'    => '<p>' . $text . '</p>',
             'innerContent' => array( $text ),
         );
     }
+    
 
     private static function create_paragraph_block_from_node( $node ) {
 
-        $html = self::replace_inline_tags( self::get_inner_html( $node ) );
-        $html = wp_kses_post( $html );
-
+        $html  = self::replace_inline_tags( self::get_inner_html( $node ) );
+        $html  = wp_kses_post( $html );
+        $align = self::detect_align( $node );      // ★ 取對齊
+        $attrs = array();
+        if ( $align ) { $attrs['align'] = $align; }
+    
         return array(
             'blockName'    => 'core/paragraph',
-            'attrs'        => array(),
+            'attrs'        => $attrs,
             'innerBlocks'  => array(),
             'innerHTML'    => '<p>' . $html . '</p>',
             'innerContent' => array( $html ),
         );
     }
+    
 
     /* ---- 把 <p><a><img></a></p> 變 image block ---- */
     private static function maybe_image_block_from_p( $p ) {
@@ -355,30 +366,61 @@ class BIO_Block_Converter {
     }
 
     /* ============== 共用工具 ============== */
+    /**
+     * 組 core/image 區塊
+     *
+     * @param string $src      圖片 URL
+     * @param string $alt      alt 文字
+     * @param string $caption  figcaption 文字 (允許空)
+     * @param string $align    '', 'center', 'left', 'right'…
+     * @return array           Gutenberg block array
+     */
     private static function build_image_block( $src, $alt, $caption, $align ) {
 
-        $figure_class = 'wp-block-image' . ( $align ? ' align' . $align : '' );
+        /* --------- 1. 取附件 ID（若有） --------- */
+        $id        = attachment_url_to_postid( $src );
+        $size_slug = 'full';             // 這裡固定 full；要偵測實際尺寸可再加判斷
+        $img_class = $id ? 'wp-image-' . $id : '';
+        $fig_class = 'wp-block-image' . ( $align ? ' align' . $align : '' ) .
+                    ( $size_slug ? ' size-' . $size_slug : '' );
 
-        $html = '<figure class="' . esc_attr( $figure_class ) . '"><img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"/>';
+        /* --------- 2. figure / img / caption HTML --------- */
+        $html  = '<figure class="' . esc_attr( $fig_class ) . '">';
+        $html .= '<img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"'
+            .  ( $img_class ? ' class="' . esc_attr( $img_class ) . '"' : '' )
+            .  '/>';
         if ( $caption !== '' ) {
-            $html .= '<figcaption class="wp-element-caption"><strong>' . wp_kses_post( $caption ) . '</strong></figcaption>';
+            $html .= '<figcaption class="wp-element-caption"><strong>' .
+                    wp_kses_post( $caption ) . '</strong></figcaption>';
         }
         $html .= '</figure>';
 
+        /* --------- 3. block attrs --------- */
+        $attrs = array(
+            'sizeSlug'        => $size_slug,
+            'linkDestination' => 'none',
+        );
+        if ( $id ) {
+            $attrs['id'] = $id;
+        } else {
+            $attrs['url'] = $src;
+        }
+        if ( $align ) {
+            $attrs['align'] = $align;
+        }
+        // className（讓 block JSON 與 figure class 一致）
+        $attrs['className'] = trim( 'wp-block-image' . ( $align ? ' align' . $align : '' ) );
+
+        /* --------- 4. 回傳區塊 --------- */
         return array(
             'blockName'    => 'core/image',
-            'attrs'        => array(
-                'url'             => $src,
-                'alt'             => $alt,
-                'sizeSlug'        => 'full',
-                'linkDestination' => 'none',
-                'align'           => $align ?: 'none',
-            ),
+            'attrs'        => $attrs,
             'innerBlocks'  => array(),
             'innerHTML'    => $html,
             'innerContent' => array( $html ),
         );
     }
+
 
     private static function get_inner_html( $node ) {
 
@@ -388,6 +430,32 @@ class BIO_Block_Converter {
         }
         return $html;
     }
+
+    /**
+     * 往上追溯自己與父節點，若 style / align 有 text-align:center，就回傳 'center'
+     *
+     * @param DOMNode $node
+     * @return string '', 'center', 'left', 'right'…
+     */
+    private static function detect_align( $node ) {
+        for ( $n = $node; $n && $n->nodeType === XML_ELEMENT_NODE; $n = $n->parentNode ) {
+
+            // style="text-align: center"
+            if ( $n->hasAttribute( 'style' ) &&
+                stripos( $n->getAttribute( 'style' ), 'text-align' ) !== false &&
+                stripos( $n->getAttribute( 'style' ), 'center' ) !== false ) {
+                return 'center';
+            }
+
+            // align="center"
+            if ( $n->hasAttribute( 'align' ) &&
+                strtolower( $n->getAttribute( 'align' ) ) === 'center' ) {
+                return 'center';
+            }
+        }
+        return '';
+    }
+
 }
 
 /**
