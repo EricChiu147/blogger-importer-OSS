@@ -19,8 +19,11 @@ class BIO_Block_Converter {
     /**
      * Convert HTML content to Gutenberg blocks
      *
+     * This modification ensures proper UTF-8 character handling
+     * throughout the block conversion process.
+     *
      * @param string $content HTML content
-     * @return string         Serialized blocks content for WordPress
+     * @return string         Content in blocks format
      */
     public static function convert_to_blocks($content) {
         // Apply fix_encoding before conversion
@@ -31,11 +34,6 @@ class BIO_Block_Converter {
         
         // Clean up the content
         $content = self::clean_content($content);
-        
-        // If the content doesn't have HTML tags, just return a simple paragraph block
-        if (strpos($content, '<') === false || strpos($content, '>') === false) {
-            return '<!-- wp:paragraph --><p>' . $content . '</p><!-- /wp:paragraph -->';
-        }
         
         // Initialize blocks array
         $blocks = array();
@@ -65,56 +63,15 @@ class BIO_Block_Converter {
         // Allow filtering of blocks after conversion
         $blocks = apply_filters('bio_post_convert_to_blocks', $blocks, $content);
         
-        // Convert the blocks array to proper serialized block format
-        $serialized_content = '';
-        foreach ($blocks as $block) {
-            $serialized_content .= self::serialize_block($block);
+        // Convert blocks array to JSON string with UTF-8 encoding preserved
+        $blocks_json = wp_json_encode($blocks, JSON_UNESCAPED_UNICODE);
+        
+        // Additional safety check - fix any encoding issues that might have been introduced
+        if (function_exists('bio_fix_encoding')) {
+            $blocks_json = bio_fix_encoding($blocks_json);
         }
         
-        // Return the serialized blocks content
-        return $serialized_content;
-    }
-
-    /**
-     * Serialize a block into WordPress block format
-     *
-     * @param array $block Block data
-     * @return string      Serialized block in WordPress format
-     */
-    private static function serialize_block($block) {
-        $serialized = '';
-        
-        if (empty($block['blockName'])) {
-            // This is a plain HTML content block
-            return $block['innerHTML'] ?? '';
-        }
-        
-        // Start with block comment
-        $serialized .= '<!-- wp:' . $block['blockName'];
-        
-        // Add attributes if any
-        if (!empty($block['attrs'])) {
-            $serialized .= ' ' . wp_json_encode($block['attrs'], JSON_UNESCAPED_UNICODE);
-        }
-        
-        $serialized .= ' -->';
-        
-        // Add inner content or process inner blocks
-        if (!empty($block['innerContent'][0])) {
-            $serialized .= $block['innerContent'][0];
-        }
-        
-        // Handle inner blocks if any
-        if (!empty($block['innerBlocks'])) {
-            foreach ($block['innerBlocks'] as $inner_block) {
-                $serialized .= self::serialize_block($inner_block);
-            }
-        }
-        
-        // Close the block
-        $serialized .= '<!-- /wp:' . $block['blockName'] . ' -->';
-        
-        return $serialized;
+        return $blocks_json;
     }
     
     /**
