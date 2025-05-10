@@ -40,15 +40,36 @@ class BIO_Media_Handler {
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
         
+        // Fix Google image URLs to ensure they have proper extensions
+        $url = self::fix_google_image_url($url);
+        
         // Get filename from URL
         $filename = basename(parse_url($url, PHP_URL_PATH));
         
         // Sanitize filename
         $filename = bio_sanitize_filename($filename);
         
-        // If filename has no extension, try to determine it from URL
+        // Handle Google URLs without extensions
+        $is_google_url = self::is_google_url($url);
         $file_ext = pathinfo($filename, PATHINFO_EXTENSION);
-        if (empty($file_ext)) {
+        
+        if ($is_google_url && empty($file_ext)) {
+            // Determine content type from headers
+            $headers = wp_remote_head($url);
+            if (!is_wp_error($headers)) {
+                $content_type = wp_remote_retrieve_header($headers, 'content-type');
+                
+                // Add extension based on content type
+                $extension = self::get_extension_from_content_type($content_type);
+                if (!empty($extension)) {
+                    $filename = sanitize_file_name(md5($url) . '.' . $extension);
+                }
+            } else {
+                // If we can't determine content type, default to jpg
+                $filename = sanitize_file_name(md5($url) . '.jpg');
+            }
+        } elseif (empty($file_ext)) {
+            // For non-Google URLs, try to determine extension
             $file_ext = bio_get_url_extension($url);
             if (!empty($file_ext)) {
                 $filename .= '.' . $file_ext;
@@ -59,7 +80,7 @@ class BIO_Media_Handler {
         add_filter('http_request_timeout', function() { return 60; }); // 60 seconds
         
         // Download the file with retry
-        $tmp_file = bio_get_temp_file_path('bio_media', $file_ext);
+        $tmp_file = bio_get_temp_file_path('bio_media', pathinfo($filename, PATHINFO_EXTENSION));
         
         $operation_id = 'download_media_' . md5($url);
         $downloaded = BIO_Error_Handler::execute_with_retry(
@@ -85,6 +106,15 @@ class BIO_Media_Handler {
             );
             return new WP_Error('download_failed', __('Downloaded file not found', 'blogger-import-opensource'));
         }
+        
+        // Verify and fix file extension based on actual content
+        $tmp_file = self::verify_and_fix_file_extension($tmp_file, $filename);
+        if (is_wp_error($tmp_file)) {
+            return $tmp_file;
+        }
+        
+        // Update filename after potential extension fix
+        $filename = basename($tmp_file);
         
         // Prepare file data
         $file_array = array(
@@ -400,6 +430,136 @@ class BIO_Media_Handler {
         
         return $id;
     }
+    
+    /**
+     * Check if a URL is from Google's image services
+     *
+     * @param string $url URL to check
+     * @return bool      True if URL is from Google
+     */
+    public static function is_google_url($url) {
+        return (
+            strpos($url, 'googleusercontent.com') !== false ||
+            strpos($url, 'blogspot.com') !== false ||
+            strpos($url, 'ggpht.com') !== false ||
+            strpos($url, 'blogger.com') !== false ||
+            strpos($url, 'bp.blogspot.com') !== false
+        );
+    }
+    
+    /**
+     * Fix Google image URLs to make them importable
+     * 
+     * @param string $url Image URL
+     * @return string     Fixed URL with proper parameters
+     */
+    public static function fix_google_image_url($url) {
+        if (self::is_google_url($url)) {
+            // Remove any size parameters that might restrict image size
+            $url = preg_replace('/=s\d+(-c)?/', '', $url);
+            $url = preg_replace('/=w\d+(-h\d+)?(-c)?/', '', $url);
+            
+            // Add size parameter if not present
+            if (strpos($url, '?') === false) {
+                $url .= '?imgmax=2000';
+            } elseif (strpos($url, 'imgmax=') === false) {
+                $url .= '&imgmax=2000';
+            }
+        }
+        
+        return $url;
+    }
+    
+    /**
+     * Get file extension from content type
+     *
+     * @param string $content_type Content type header
+     * @return string              File extension without dot
+     */
+    public static function get_extension_from_content_type($content_type) {
+        $extension = '';
+        
+        if (strpos($content_type, 'image/jpeg') !== false) {
+            $extension = 'jpg';
+        } elseif (strpos($content_type, 'image/png') !== false) {
+            $extension = 'png';
+        } elseif (strpos($content_type, 'image/gif') !== false) {
+            $extension = 'gif';
+        } elseif (strpos($content_type, 'image/webp') !== false) {
+            $extension = 'webp';
+        } elseif (strpos($content_type, 'image/') !== false) {
+            // Extract extension from content type for other image types
+            $extension = str_replace('image/', '', $content_type);
+        }
+        
+        return $extension;
+    }
+    
+    /**
+     * Verify and fix the file extension based on actual content
+     *
+     * @param string $file_path File path
+     * @param string $filename  Original filename
+     * @return string|WP_Error  Updated file path or error
+     */
+    public static function verify_and_fix_file_extension($file_path, $filename) {
+        if (!file_exists($file_path)) {
+            return new WP_Error('file_not_found', __('File not found for extension verification', 'blogger-import-opensource'));
+        }
+        
+        // Check file type
+        $file_type = wp_check_filetype($filename, null);
+        
+        if (empty($file_type['type'])) {
+            // Try to determine file type from content
+            if (function_exists('exif_imagetype')) {
+                $image_type = @exif_imagetype($file_path);
+                
+                if ($image_type) {
+                    $mime = image_type_to_mime_type($image_type);
+                    $ext = image_type_to_extension($image_type, false);
+                    
+                    if (!empty($ext)) {
+                        $new_file_path = $file_path . '.' . $ext;
+                        rename($file_path, $new_file_path);
+                        return $new_file_path;
+                    }
+                }
+            }
+            
+            // If exif_imagetype is not available or fails, try to examine file content
+            $file_header = file_get_contents($file_path, false, null, 0, 12);
+            
+            if (strpos($file_header, "\xFF\xD8\xFF") === 0) {
+                // JPEG signature
+                $new_file_path = $file_path . '.jpg';
+                rename($file_path, $new_file_path);
+                return $new_file_path;
+            } elseif (strpos($file_header, "\x89PNG\x0D\x0A\x1A\x0A") === 0) {
+                // PNG signature
+                $new_file_path = $file_path . '.png';
+                rename($file_path, $new_file_path);
+                return $new_file_path;
+            } elseif (strpos($file_header, "GIF8") === 0) {
+                // GIF signature
+                $new_file_path = $file_path . '.gif';
+                rename($file_path, $new_file_path);
+                return $new_file_path;
+            } elseif (strpos($file_header, "RIFF") === 0 && strpos($file_header, "WEBP") !== false) {
+                // WEBP signature
+                $new_file_path = $file_path . '.webp';
+                rename($file_path, $new_file_path);
+                return $new_file_path;
+            }
+            
+            // Default to JPG if we can't determine the type
+            $new_file_path = $file_path . '.jpg';
+            rename($file_path, $new_file_path);
+            return $new_file_path;
+        }
+        
+        return $file_path;
+    }
 }
 
 /**
@@ -449,4 +609,18 @@ function bio_handle_post_media($post_id, $media_urls) {
     if (!empty($media_urls)) {
         bio_import_post_media($post_id, $media_urls, true);
     }
+}
+
+// Add support for additional mime types
+add_filter('upload_mimes', 'bio_add_mime_types');
+
+/**
+ * Add support for additional mime types
+ *
+ * @param array $mimes Mime types
+ * @return array       Updated mime types
+ */
+function bio_add_mime_types($mimes) {
+    $mimes['webp'] = 'image/webp';
+    return $mimes;
 }
