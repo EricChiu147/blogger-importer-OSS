@@ -20,7 +20,7 @@ This importer plugin can:
 - Import all posts, pages, and commands into wordpress from a blogger-exported .xml file.
 - Import all blogger post tags into wordpress tag.
 - Import and save all images in the media library. (not tested for videos)
-- Turn the contents in the posts into blocks. Tested: paragraph, headings, image blocks.
+- Turn the contents in the posts into blocks. (tested: paragraph, headings, image blocks)
 - Keep links, alignment settings, and image caption remains the same.
 - Support uft-8 characters. (tested: English and Chinese contents)
 
