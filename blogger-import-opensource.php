@@ -42,6 +42,11 @@ require_once BIO_PLUGIN_DIR . 'includes/db-handler.php';
 require_once BIO_PLUGIN_DIR . 'includes/error-handler.php';
 require_once BIO_PLUGIN_DIR . 'includes/utils.php';
 
+// Add filters to fix encoding issues
+add_filter('the_content', 'bio_fix_encoding', 20); // Priority 20 to run after other filters
+add_filter('the_title', 'bio_fix_encoding', 20);
+add_filter('the_excerpt', 'bio_fix_encoding', 20);
+
 // Include CLI command if WP-CLI is available
 if (defined('WP_CLI') && WP_CLI) {
     require_once BIO_PLUGIN_DIR . 'includes/cli-command.php';
