@@ -221,24 +221,36 @@ function bio_sanitize_array($array) {
  * @return string      Properly encoded text
  */
 function bio_fix_encoding($text) {
-    // Use the BIO_DB_Handler method if available
-    if (class_exists('BIO_DB_Handler') && method_exists('BIO_DB_Handler', 'ensure_proper_encoding')) {
-        return BIO_DB_Handler::ensure_proper_encoding($text);
+    // Skip if not a string
+    if (!is_string($text)) {
+        return $text;
     }
     
-    // Fallback implementation
-    // Fix Unicode escape sequences like u5408u7968 (Chinese characters)
-    if (is_string($text) && preg_match('/u[0-9a-fA-F]{4}/', $text)) {
+    // Fix Unicode sequences like u7ffb (Chinese characters without backslash)
+    if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
         $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
-            return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
+            try {
+                // Method 1: Use mb_convert_encoding with pack
+                $hex = $matches[1];
+                $char = mb_convert_encoding(pack('H*', $hex), 'UTF-8', 'UCS-2BE');
+                return $char;
+            } catch (Exception $e) {
+                // Fallback to method 2
+                try {
+                    // Method 2: Try json_decode with proper escape sequence
+                    $escaped = '"\u' . $matches[1] . '"';
+                    $char = json_decode($escaped);
+                    if ($char !== null) {
+                        return $char;
+                    }
+                } catch (Exception $e) {
+                    // Ignore and return original
+                }
+                
+                // Return original if both methods fail
+                return $matches[0];
+            }
         }, $text);
-    }
-    
-    // Ensure proper UTF-8 encoding if mbstring is available
-    if (is_string($text) && function_exists('mb_check_encoding') && !mb_check_encoding($text, 'UTF-8')) {
-        if (function_exists('mb_convert_encoding')) {
-            $text = mb_convert_encoding($text, 'UTF-8', 'auto');
-        }
     }
     
     return $text;

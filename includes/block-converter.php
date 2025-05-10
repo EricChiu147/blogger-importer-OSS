@@ -19,10 +19,16 @@ class BIO_Block_Converter {
     /**
      * Convert HTML content to Gutenberg blocks
      *
+     * This modification ensures proper UTF-8 character handling
+     * throughout the block conversion process.
+     *
      * @param string $content HTML content
      * @return string         Content in blocks format
      */
     public static function convert_to_blocks($content) {
+        // Apply fix_encoding before conversion
+        $content = function_exists('bio_fix_encoding') ? bio_fix_encoding($content) : $content;
+        
         // Allow filtering of content before conversion
         $content = apply_filters('bio_pre_convert_to_blocks', $content);
         
@@ -57,8 +63,13 @@ class BIO_Block_Converter {
         // Allow filtering of blocks after conversion
         $blocks = apply_filters('bio_post_convert_to_blocks', $blocks, $content);
         
-        // Convert blocks array to JSON string
-        $blocks_json = wp_json_encode($blocks);
+        // Convert blocks array to JSON string with UTF-8 encoding preserved
+        $blocks_json = wp_json_encode($blocks, JSON_UNESCAPED_UNICODE);
+        
+        // Additional safety check - fix any encoding issues that might have been introduced
+        if (function_exists('bio_fix_encoding')) {
+            $blocks_json = bio_fix_encoding($blocks_json);
+        }
         
         return $blocks_json;
     }
