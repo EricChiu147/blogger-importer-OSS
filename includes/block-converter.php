@@ -210,14 +210,35 @@ class BIO_Block_Converter {
      * @return array       Paragraph block
      */
     private static function create_paragraph_block($text) {
+        $text = wp_kses_post($text); // 基本過濾
         return array(
-            'blockName' => 'core/paragraph',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<p>' . $text . '</p>',
-            'innerContent' => array('<p>' . $text . '</p>')
+            'blockName'    => 'core/paragraph',
+            'attrs'        => array(),
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<p>' . $text . '</p>',
+            'innerContent' => array($text),           // ★ 只放純文字
         );
     }
+
+    /**
+     * Create a paragraph block from a node
+     *
+     * @param DOMNode $node Paragraph node
+     * @return array        Paragraph block
+     */
+    private static function create_paragraph_block_from_node($node) {
+        $html  = self::get_inner_html($node);        // 這裡拿到的已經是不含 <p> 的內容
+        $html  = wp_kses_post($html);
+
+        return array(
+            'blockName'    => 'core/paragraph',
+            'attrs'        => array(),
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<p>' . $html . '</p>',
+            'innerContent' => array($html),           // ★ 只放純內容
+        );
+    }
+
     
     /**
      * Create a paragraph block from a node
@@ -242,41 +263,28 @@ class BIO_Block_Converter {
      * Create a list block
      *
      * @param DOMNode $node List node
-     * @param string  $type List type (ordered/unordered)
+     * @param string  $type 'ordered' 或 'unordered'
      * @return array        List block
      */
     private static function create_list_block($node, $type) {
-        // Get the HTML content of the list
         $html = self::get_inner_html($node);
-        
-        $block_type = $type === 'ordered' ? 'core/list-item' : 'core/list';
-        
-        // Create inner blocks for each list item
-        $inner_blocks = array();
-        
-        $list_items = $node->getElementsByTagName('li');
-        foreach ($list_items as $item) {
-            $inner_blocks[] = array(
-                'blockName' => 'core/list-item',
-                'attrs' => array(),
-                'innerBlocks' => array(),
-                'innerHTML' => $item->nodeValue,
-                'innerContent' => array($item->nodeValue)
-            );
+        $tag  = $type === 'ordered' ? 'ol' : 'ul';
+
+        // 取出每個 <li> 做 innerContent
+        $inner_content = array();
+        foreach ($node->getElementsByTagName('li') as $li) {
+            $inner_content[] = '<li>' . self::get_inner_html($li) . '</li>';
         }
-        
-        $tag = $type === 'ordered' ? 'ol' : 'ul';
-        
+
         return array(
-            'blockName' => $block_type,
-            'attrs' => array(
-                'ordered' => $type === 'ordered'
-            ),
-            'innerBlocks' => $inner_blocks,
-            'innerHTML' => '<' . $tag . '>' . $html . '</' . $tag . '>',
-            'innerContent' => array('<' . $tag . '>', null, '</' . $tag . '>')
+            'blockName'    => 'core/list',
+            'attrs'        => array('ordered' => $type === 'ordered'),
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<' . $tag . '>' . $html . '</' . $tag . '>',
+            'innerContent' => $inner_content,
         );
     }
+
     
     /**
      * Create a quote block
