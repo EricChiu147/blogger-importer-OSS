@@ -7,7 +7,7 @@ This repository contains code and documentation generated primarily using AI too
 
 Users should treat this code as experimental and review it carefully before using it in production or security-sensitive contexts.
 
-I will fully review the code someday in the future, but I have to honestly say that most of the current code was done my LLMs. Make sure you backup your sites first or create a test site to test this plugin first. There is no garenteen that this plugin won't damage other existing contents.
+I will fully review the code someday in the future, but I have to honestly say that most of the current code was done by LLMs. Make sure you backup your sites first or create a test site to test this plugin first. There is no garenteen that this plugin won't damage other existing contents.
 
 
 
