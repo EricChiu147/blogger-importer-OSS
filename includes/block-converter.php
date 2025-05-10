@@ -79,7 +79,19 @@ class BIO_Block_Converter {
                     case 'b': case 'strong':
                     case 'i': case 'em':
                     case 'u': case 'span':
-                        $blocks[] = self::create_paragraph_block_from_node( $child );
+                        // 取「含自身」HTML，保留 <strong> 等標籤
+                        $html  = self::replace_inline_tags( self::get_outer_html( $child ) );
+                        $html  = wp_kses_post( $html );
+                        $align = self::detect_align( $child );
+                        $attrs = $align ? array( 'align' => $align ) : array();
+
+                        $blocks[] = array(
+                            'blockName'    => 'core/paragraph',
+                            'attrs'        => $attrs,
+                            'innerBlocks'  => array(),
+                            'innerHTML'    => '<p>' . $html . '</p>',
+                            'innerContent' => array( $html ),
+                        );
                         break;
 
                     /* ---- Lists ---- */
@@ -93,9 +105,20 @@ class BIO_Block_Converter {
 
                     /* ---- Others ---- */
                     case 'a':
-                        // 單獨出現的超連結整行視為段落
-                        $blocks[] = self::create_paragraph_block_from_node( $child );
+                        $html  = self::replace_inline_tags( self::get_outer_html( $child ) );
+                        $html  = wp_kses_post( $html );
+                        $align = self::detect_align( $child );
+                        $attrs = $align ? array( 'align' => $align ) : array();
+                    
+                        $blocks[] = array(
+                            'blockName'    => 'core/paragraph',
+                            'attrs'        => $attrs,
+                            'innerBlocks'  => array(),
+                            'innerHTML'    => '<p>' . $html . '</p>',
+                            'innerContent' => array( $html ),
+                        );
                         break;
+                    
                     case 'blockquote':
                         $blocks[] = self::create_quote_block( $child );
                         break;
@@ -204,46 +227,41 @@ class BIO_Block_Converter {
     }
     
 
-    /* ---- 把 <p><a><img></a></p> 變 image block ---- */
+    /**
+     * 若 <p> 只包含 1 張圖片（可被 <a> 包住），就轉成 image block
+     * 否則回傳 false
+     */
     private static function maybe_image_block_from_p( $p ) {
 
-        // 去掉空白再數子節點
-        $imgs   = $p->getElementsByTagName( 'img' );
-        $a_tags = $p->getElementsByTagName( 'a' );
-
-        if ( $imgs->length !== 1 ) {
-            return false;
-        }
-
-        // 確保段落沒有其他文字
+        /* --- 0. 不能有非 <a>/<img>/<br> 以外的元素 --- */
         foreach ( $p->childNodes as $c ) {
-            if ( $c->nodeType === XML_TEXT_NODE && trim( $c->nodeValue ) !== '' ) {
+            if ( $c->nodeType === XML_ELEMENT_NODE &&
+                ! in_array( $c->nodeName, array( 'a', 'img', 'br' ), true ) ) {
                 return false;
+            }
+            if ( $c->nodeType === XML_TEXT_NODE && trim( $c->nodeValue ) !== '' ) {
+                return false;        // 有文字就當普通段落
             }
         }
 
-        $img = $imgs->item( 0 );
+        /* --- 1. 取圖片節點（可能被 <a> 包住） --- */
+        $img = $p->getElementsByTagName( 'img' )->item( 0 );
+        if ( ! $img ) {
+            return false;
+        }
         $src = $img->getAttribute( 'src' );
         if ( ! $src ) {
             return false;
         }
+        $alt = $img->getAttribute( 'alt' ) ?: '';
 
-        $alt   = $img->getAttribute( 'alt' ) ?: '';
-        $align = '';
+        /* --- 2. 判斷置中 / 置右 --- */
+        $align = self::detect_align( $p );   // 會向上追溯 <div style="text-align:…">
 
-        // Blogger 常用 <a style="margin-left: 1em;margin-right: 1em">
-        if ( $p->hasAttribute( 'style' ) && stripos( $p->getAttribute( 'style' ), 'text-align: center' ) !== false ) {
-            $align = 'center';
-        }
-        if ( $a_tags->length && $a_tags->item( 0 )->hasAttribute( 'style' ) ) {
-            $style = $a_tags->item( 0 )->getAttribute( 'style' );
-            if ( stripos( $style, 'margin-left' ) !== false && stripos( $style, 'margin-right' ) !== false ) {
-                $align = 'center';
-            }
-        }
-
+        /* --- 3. 回傳 image block --- */
         return self::build_image_block( $src, $alt, '', $align );
     }
+
 
     /* ---- List / Quote / Code / Image / Table / Embed
        (略，與前版相同，請保持原樣)… ---- */
@@ -432,30 +450,41 @@ class BIO_Block_Converter {
     }
 
     /**
-     * 往上追溯自己與父節點，若 style / align 有 text-align:center，就回傳 'center'
-     *
-     * @param DOMNode $node
-     * @return string '', 'center', 'left', 'right'…
+     * 由自己往父節點找 text-align / align 屬性
+     * 回傳 '', 'center', 'right', 'left'
      */
     private static function detect_align( $node ) {
         for ( $n = $node; $n && $n->nodeType === XML_ELEMENT_NODE; $n = $n->parentNode ) {
 
-            // style="text-align: center"
-            if ( $n->hasAttribute( 'style' ) &&
-                stripos( $n->getAttribute( 'style' ), 'text-align' ) !== false &&
-                stripos( $n->getAttribute( 'style' ), 'center' ) !== false ) {
-                return 'center';
+            // style="text-align: …"
+            if ( $n->hasAttribute( 'style' ) ) {
+                $style = strtolower( $n->getAttribute( 'style' ) );
+                if ( strpos( $style, 'text-align' ) !== false ) {
+                    if ( strpos( $style, 'center' ) !== false ) return 'center';
+                    if ( strpos( $style, 'right'  ) !== false ) return 'right';
+                    if ( strpos( $style, 'left'   ) !== false ) return 'left';
+                }
             }
 
-            // align="center"
-            if ( $n->hasAttribute( 'align' ) &&
-                strtolower( $n->getAttribute( 'align' ) ) === 'center' ) {
-                return 'center';
+            // align="…"
+            if ( $n->hasAttribute( 'align' ) ) {
+                $align = strtolower( $n->getAttribute( 'align' ) );
+                if ( in_array( $align, array( 'center', 'right', 'left' ), true ) ) {
+                    return $align;
+                }
             }
         }
         return '';
     }
 
+
+    /**
+     * 回傳包含自身標籤的 HTML（DOMDocument 沒有現成方法，只能手動包）
+     */
+    private static function get_outer_html( $node ) {
+        $doc = $node->ownerDocument;
+        return $doc->saveHTML( $node );
+    }
 }
 
 /**
