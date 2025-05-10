@@ -1,4 +1,4 @@
-# blogger-importer-OSS
+# blogger-importer-opensource
 
 
 ## ⚠️AI-Generated Code Notice
