@@ -3,7 +3,7 @@
  * Plugin Name: Blogger Import Open Source
  * Plugin URI: https://github.com/EricChiu147/blogger-import-opensource
  * Description: A WordPress plugin that imports content from Blogger/Blogspot blogs, including posts, pages, comments, and media.
- * Version: 1.0.0
+ * Version: 1.2.0
  * Author: EricChiu147
  * Author URI: https://github.com/EricChiu147
  * Text Domain: blogger-import-opensource
