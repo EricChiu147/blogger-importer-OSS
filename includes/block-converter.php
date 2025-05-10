@@ -2,485 +2,359 @@
 /**
  * Block Converter for Blogger Import Open Source
  *
- * This file handles conversion from HTML to Gutenberg blocks.
+ * 將 Blogger 匯入的 HTML 轉成 Gutenberg 區塊。
  *
  * @package Blogger_Import_OpenSource
  */
 
-// If this file is called directly, abort.
-if (!defined('WPINC')) {
+if ( ! defined( 'WPINC' ) ) {
     die;
 }
 
-/**
- * Class responsible for converting HTML to Gutenberg blocks
- */
 class BIO_Block_Converter {
+
     /**
-     * Convert HTML content to Gutenberg blocks
+     * 將 HTML 內容轉成 Gutenberg 區塊序列化字串
      *
-     * This modification ensures proper UTF-8 character handling
-     * throughout the block conversion process.
-     *
-     * @param string $content HTML content
-     * @return string         Content in blocks format
+     * @param  string $content HTML
+     * @return string          <!-- wp:... --> 形式的字串
      */
-    public static function convert_to_blocks($content) {
-        // Apply fix_encoding before conversion
-        $content = function_exists('bio_fix_encoding') ? bio_fix_encoding($content) : $content;
-        
-        // Allow filtering of content before conversion
-        $content = apply_filters('bio_pre_convert_to_blocks', $content);
-        
-        // Clean up the content
-        $content = self::clean_content($content);
-        
-        // Initialize blocks array
-        $blocks = array();
-        
-        // Split content by HTML tags
+    public static function convert_to_blocks( $content ) {
+
+        // 先跑自訂編碼修正
+        $content = function_exists( 'bio_fix_encoding' ) ? bio_fix_encoding( $content ) : $content;
+
+        // 允許外掛／佈景前置處理
+        $content = apply_filters( 'bio_pre_convert_to_blocks', $content );
+
+        // 基本清理
+        $content = self::clean_content( $content );
+
+        // DOM 解析
+        libxml_use_internal_errors( true );
         $dom = new DOMDocument();
-        
-        // Suppress warnings for malformed HTML
-        libxml_use_internal_errors(true);
-        
-        // Load HTML with UTF-8 encoding
-        $dom->loadHTML('<?xml encoding="utf-8"?>' . $content);
-        
-        // Clear errors
+        $dom->loadHTML( '<?xml encoding="utf-8"?>' . $content );
         libxml_clear_errors();
-        
-        // Process the DOM
-        $body = $dom->getElementsByTagName('body')->item(0);
-        
-        if ($body) {
-            $blocks = self::process_node($body);
+
+        $blocks = array();
+        $body   = $dom->getElementsByTagName( 'body' )->item( 0 );
+
+        if ( $body ) {
+            $blocks = self::process_node( $body );
         } else {
-            // Fallback if DOM parsing failed
-            $blocks[] = self::create_paragraph_block($content);
+            $blocks[] = self::create_paragraph_block( $content );
         }
-        
-        // Allow filtering of blocks after conversion
-        $blocks = apply_filters('bio_post_convert_to_blocks', $blocks, $content);
-        
-        // Convert blocks array to JSON string with UTF-8 encoding preserved
-        $blocks_json = wp_json_encode($blocks, JSON_UNESCAPED_UNICODE);
-        
-        // Additional safety check - fix any encoding issues that might have been introduced
-        if (function_exists('bio_fix_encoding')) {
-            $blocks_json = bio_fix_encoding($blocks_json);
-        }
-        
-        return $blocks_json;
+
+        // 後置過濾
+        $blocks = apply_filters( 'bio_post_convert_to_blocks', $blocks, $content );
+
+        // 轉成 Gutenberg 序列化格式
+        return serialize_blocks( $blocks );
     }
-    
-    /**
-     * Clean the HTML content before processing
-     *
-     * @param string $content HTML content
-     * @return string         Cleaned content
-     */
-    private static function clean_content($content) {
-        // Remove blogger-specific markup
-        $content = preg_replace('/<div class="blogger-post-footer">.*?<\/div>/s', '', $content);
-        $content = preg_replace('/<div class="blogger-comment-from">.*?<\/div>/s', '', $content);
-        
-        // Fix unclosed tags
-        $content = force_balance_tags($content);
-        
-        // Remove empty paragraphs
-        $content = preg_replace('/<p>\s*<\/p>/i', '', $content);
-        
+
+    /** --------- Helpers ---------- */
+
+    private static function clean_content( $content ) {
+
+        $content = preg_replace( '/<div class="blogger-post-footer">.*?<\/div>/s', '', $content );
+        $content = preg_replace( '/<div class="blogger-comment-from">.*?<\/div>/s', '', $content );
+        $content = force_balance_tags( $content );
+        $content = preg_replace( '/<p>\s*<\/p>/i', '', $content );
+
         return $content;
     }
-    
-    /**
-     * Process a DOM node recursively
-     *
-     * @param DOMNode $node DOM node
-     * @return array        Blocks
-     */
-    private static function process_node($node) {
+
+    private static function process_node( $node ) {
+
         $blocks = array();
-        
-        foreach ($node->childNodes as $child) {
-            if ($child->nodeType === XML_TEXT_NODE) {
-                // Text content
-                $text = trim($child->nodeValue);
-                if (!empty($text)) {
-                    $blocks[] = self::create_paragraph_block($text);
+
+        foreach ( $node->childNodes as $child ) {
+            if ( $child->nodeType === XML_TEXT_NODE ) {
+
+                $text = trim( $child->nodeValue );
+                if ( $text !== '' ) {
+                    $blocks[] = self::create_paragraph_block( $text );
                 }
-            } elseif ($child->nodeType === XML_ELEMENT_NODE) {
-                // Element node
-                switch ($child->nodeName) {
+
+            } elseif ( $child->nodeType === XML_ELEMENT_NODE ) {
+
+                switch ( $child->nodeName ) {
+
                     case 'h1':
                     case 'h2':
                     case 'h3':
                     case 'h4':
                     case 'h5':
                     case 'h6':
-                        $blocks[] = self::create_heading_block($child);
+                        $blocks[] = self::create_heading_block( $child );
                         break;
-                        
+
                     case 'p':
-                        $blocks[] = self::create_paragraph_block_from_node($child);
+                        $blocks[] = self::create_paragraph_block_from_node( $child );
                         break;
-                        
+
                     case 'ul':
-                        $blocks[] = self::create_list_block($child, 'unordered');
+                        $blocks[] = self::create_list_block( $child, 'unordered' );
                         break;
-                        
+
                     case 'ol':
-                        $blocks[] = self::create_list_block($child, 'ordered');
+                        $blocks[] = self::create_list_block( $child, 'ordered' );
                         break;
-                        
+
                     case 'blockquote':
-                        $blocks[] = self::create_quote_block($child);
+                        $blocks[] = self::create_quote_block( $child );
                         break;
-                        
+
                     case 'img':
-                        $block = self::create_image_block($child);
-                        if ($block) {
-                            $blocks[] = $block;
+                        if ( $b = self::create_image_block( $child ) ) {
+                            $blocks[] = $b;
                         }
                         break;
-                        
+
                     case 'pre':
-                        $blocks[] = self::create_code_block($child);
+                        $blocks[] = self::create_code_block( $child );
                         break;
-                        
+
                     case 'table':
-                        $blocks[] = self::create_table_block($child);
+                        $blocks[] = self::create_table_block( $child );
                         break;
-                        
+
                     case 'figure':
-                        $figureBlocks = self::process_figure($child);
-                        $blocks = array_merge($blocks, $figureBlocks);
+                        $blocks = array_merge( $blocks, self::process_figure( $child ) );
                         break;
-                        
+
                     case 'iframe':
-                        $block = self::create_embed_block($child);
-                        if ($block) {
-                            $blocks[] = $block;
+                        if ( $b = self::create_embed_block( $child ) ) {
+                            $blocks[] = $b;
                         }
                         break;
-                        
+
                     case 'div':
-                        // Process div content recursively
-                        $div_blocks = self::process_node($child);
-                        $blocks = array_merge($blocks, $div_blocks);
+                        $blocks = array_merge( $blocks, self::process_node( $child ) );
                         break;
-                        
+
                     default:
-                        // For other elements, process children recursively
-                        $child_blocks = self::process_node($child);
-                        $blocks = array_merge($blocks, $child_blocks);
+                        $blocks = array_merge( $blocks, self::process_node( $child ) );
                         break;
                 }
             }
         }
-        
+
         return $blocks;
     }
-    
-    /**
-     * Create a heading block
-     *
-     * @param DOMNode $node Heading node
-     * @return array        Heading block
-     */
-    private static function create_heading_block($node) {
-        $level = (int) substr($node->nodeName, 1);
-        
+
+    /** --------- Block creators ---------- */
+
+    private static function create_heading_block( $node ) {
+
+        $level = (int) substr( $node->nodeName, 1 );
+
         return array(
-            'blockName' => 'core/heading',
-            'attrs' => array(
-                'level' => $level
-            ),
-            'innerBlocks' => array(),
-            'innerHTML' => $node->nodeValue,
-            'innerContent' => array($node->nodeValue)
+            'blockName'    => 'core/heading',
+            'attrs'        => array( 'level' => $level ),
+            'innerBlocks'  => array(),
+            'innerHTML'    => $node->nodeValue,
+            'innerContent' => array( $node->nodeValue ),
         );
     }
-    
-    /**
-     * Create a paragraph block from text
-     *
-     * @param string $text Text content
-     * @return array       Paragraph block
-     */
-    private static function create_paragraph_block($text) {
-        $text = wp_kses_post($text); // 基本過濾
+
+    private static function create_paragraph_block( $text ) {
+
+        $text = wp_kses_post( $text );
+
         return array(
             'blockName'    => 'core/paragraph',
             'attrs'        => array(),
             'innerBlocks'  => array(),
             'innerHTML'    => '<p>' . $text . '</p>',
-            'innerContent' => array($text),           // ★ 只放純文字
+            'innerContent' => array( $text ),
         );
     }
 
-    /**
-     * Create a paragraph block from a node
-     *
-     * @param DOMNode $node Paragraph node
-     * @return array        Paragraph block
-     */
-    private static function create_paragraph_block_from_node($node) {
-        $html  = self::get_inner_html($node);        // 這裡拿到的已經是不含 <p> 的內容
-        $html  = wp_kses_post($html);
+    private static function create_paragraph_block_from_node( $node ) {
+
+        $html = wp_kses_post( self::get_inner_html( $node ) );
 
         return array(
             'blockName'    => 'core/paragraph',
             'attrs'        => array(),
             'innerBlocks'  => array(),
             'innerHTML'    => '<p>' . $html . '</p>',
-            'innerContent' => array($html),           // ★ 只放純內容
+            'innerContent' => array( $html ),
         );
     }
 
-    
-    /**
-     * Create a paragraph block from a node
-     *
-     * @param DOMNode $node Paragraph node
-     * @return array        Paragraph block
-     */
-    private static function create_paragraph_block_from_node($node) {
-        // Get the HTML content of the paragraph
-        $html = self::get_inner_html($node);
-        
-        return array(
-            'blockName' => 'core/paragraph',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<p>' . $html . '</p>',
-            'innerContent' => array('<p>' . $html . '</p>')
-        );
-    }
-    
     /**
      * Create a list block
      *
-     * @param DOMNode $node List node
-     * @param string  $type 'ordered' 或 'unordered'
-     * @return array        List block
+     * @param  DOMNode $node <ul> 或 <ol>
+     * @param  string  $type 'ordered' / 'unordered'
+     * @return array         List block
      */
-    private static function create_list_block($node, $type) {
-        $html = self::get_inner_html($node);
+    private static function create_list_block( $node, $type ) {
+
+        $html = self::get_inner_html( $node );
         $tag  = $type === 'ordered' ? 'ol' : 'ul';
 
-        // 取出每個 <li> 做 innerContent
         $inner_content = array();
-        foreach ($node->getElementsByTagName('li') as $li) {
-            $inner_content[] = '<li>' . self::get_inner_html($li) . '</li>';
+        foreach ( $node->getElementsByTagName( 'li' ) as $li ) {
+            $inner_content[] = '<li>' . self::get_inner_html( $li ) . '</li>';
         }
 
         return array(
             'blockName'    => 'core/list',
-            'attrs'        => array('ordered' => $type === 'ordered'),
+            'attrs'        => array( 'ordered' => ( $type === 'ordered' ) ),
             'innerBlocks'  => array(),
             'innerHTML'    => '<' . $tag . '>' . $html . '</' . $tag . '>',
             'innerContent' => $inner_content,
         );
     }
 
-    
-    /**
-     * Create a quote block
-     *
-     * @param DOMNode $node Quote node
-     * @return array        Quote block
-     */
-    private static function create_quote_block($node) {
-        // Get the HTML content of the quote
-        $html = self::get_inner_html($node);
-        
+    private static function create_quote_block( $node ) {
+
+        $html = self::get_inner_html( $node );
+
         return array(
-            'blockName' => 'core/quote',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<blockquote>' . $html . '</blockquote>',
-            'innerContent' => array('<blockquote>' . $html . '</blockquote>')
+            'blockName'    => 'core/quote',
+            'attrs'        => array(),
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<blockquote>' . $html . '</blockquote>',
+            'innerContent' => array( '<blockquote>' . $html . '</blockquote>' ),
         );
     }
-    
-    /**
-     * Create an image block
-     *
-     * @param DOMNode $node Image node
-     * @return array|false  Image block or false if not valid
-     */
-    private static function create_image_block($node) {
-        $src = $node->getAttribute('src');
-        
-        if (empty($src)) {
+
+    private static function create_image_block( $node ) {
+
+        $src = $node->getAttribute( 'src' );
+        if ( ! $src ) {
             return false;
         }
-        
-        $alt = $node->getAttribute('alt') ?: '';
+
+        $alt     = $node->getAttribute( 'alt' ) ?: '';
         $caption = '';
-        
-        // Check if there's a parent figure with figcaption
-        $parent = $node->parentNode;
-        if ($parent && $parent->nodeName === 'figure') {
-            $captions = $parent->getElementsByTagName('figcaption');
-            if ($captions->length > 0) {
-                $caption = $captions->item(0)->nodeValue;
+
+        if ( $node->parentNode && $node->parentNode->nodeName === 'figure' ) {
+            $caps = $node->parentNode->getElementsByTagName( 'figcaption' );
+            if ( $caps->length ) {
+                $caption = $caps->item( 0 )->nodeValue;
             }
         }
-        
+
         $block = array(
-            'blockName' => 'core/image',
-            'attrs' => array(
+            'blockName'    => 'core/image',
+            'attrs'        => array(
                 'url' => $src,
                 'alt' => $alt,
             ),
-            'innerBlocks' => array(),
-            'innerHTML' => '<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/></figure>',
-            'innerContent' => array('<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/></figure>')
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<figure class="wp-block-image"><img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"/></figure>',
+            'innerContent' => array(
+                '<figure class="wp-block-image"><img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"/></figure>',
+            ),
         );
-        
-        // Add caption if exists
-        if (!empty($caption)) {
+
+        if ( $caption !== '' ) {
             $block['attrs']['caption'] = $caption;
-            $block['innerHTML'] = '<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/><figcaption>' . $caption . '</figcaption></figure>';
-            $block['innerContent'] = array('<figure class="wp-block-image"><img src="' . esc_url($src) . '" alt="' . esc_attr($alt) . '"/><figcaption>' . $caption . '</figcaption></figure>');
+            $block['innerHTML']        = '<figure class="wp-block-image"><img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"/><figcaption>' . $caption . '</figcaption></figure>';
+            $block['innerContent']      = array(
+                '<figure class="wp-block-image"><img src="' . esc_url( $src ) . '" alt="' . esc_attr( $alt ) . '"/><figcaption>' . $caption . '</figcaption></figure>',
+            );
         }
-        
+
         return $block;
     }
-    
-    /**
-     * Create a code block
-     *
-     * @param DOMNode $node Code node
-     * @return array        Code block
-     */
-    private static function create_code_block($node) {
-        // Get the text content
-        $code = $node->textContent;
-        
+
+    private static function create_code_block( $node ) {
+
+        $code = esc_html( $node->textContent );
+
         return array(
-            'blockName' => 'core/code',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<pre><code>' . esc_html($code) . '</code></pre>',
-            'innerContent' => array('<pre><code>' . esc_html($code) . '</code></pre>')
+            'blockName'    => 'core/code',
+            'attrs'        => array(),
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<pre><code>' . $code . '</code></pre>',
+            'innerContent' => array( '<pre><code>' . $code . '</code></pre>' ),
         );
     }
-    
-    /**
-     * Create a table block
-     *
-     * @param DOMNode $node Table node
-     * @return array        Table block
-     */
-    private static function create_table_block($node) {
-        // Get the HTML content of the table
-        $html = self::get_inner_html($node);
-        
+
+    private static function create_table_block( $node ) {
+
+        $html = self::get_inner_html( $node );
+
         return array(
-            'blockName' => 'core/table',
-            'attrs' => array(),
-            'innerBlocks' => array(),
-            'innerHTML' => '<figure class="wp-block-table"><table>' . $html . '</table></figure>',
-            'innerContent' => array('<figure class="wp-block-table"><table>' . $html . '</table></figure>')
+            'blockName'    => 'core/table',
+            'attrs'        => array(),
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<figure class="wp-block-table"><table>' . $html . '</table></figure>',
+            'innerContent' => array(
+                '<figure class="wp-block-table"><table>' . $html . '</table></figure>',
+            ),
         );
     }
-    
-    /**
-     * Process a figure element
-     *
-     * @param DOMNode $node Figure node
-     * @return array        Blocks
-     */
-    private static function process_figure($node) {
-        $blocks = array();
-        
-        // Check for image
-        $images = $node->getElementsByTagName('img');
-        if ($images->length > 0) {
-            $blocks[] = self::create_image_block($images->item(0));
-            return $blocks;
+
+    private static function process_figure( $node ) {
+
+        if ( $node->getElementsByTagName( 'img' )->length ) {
+            return array( self::create_image_block( $node->getElementsByTagName( 'img' )->item( 0 ) ) );
         }
-        
-        // Check for iframe (embed)
-        $iframes = $node->getElementsByTagName('iframe');
-        if ($iframes->length > 0) {
-            $block = self::create_embed_block($iframes->item(0));
-            if ($block) {
-                $blocks[] = $block;
+
+        if ( $node->getElementsByTagName( 'iframe' )->length ) {
+            if ( $b = self::create_embed_block( $node->getElementsByTagName( 'iframe' )->item( 0 ) ) ) {
+                return array( $b );
             }
-            return $blocks;
         }
-        
-        // Process as generic content
-        return self::process_node($node);
+
+        return self::process_node( $node );
     }
-    
-    /**
-     * Create an embed block
-     *
-     * @param DOMNode $node Iframe node
-     * @return array|false  Embed block or false if not valid
-     */
-    private static function create_embed_block($node) {
-        $src = $node->getAttribute('src');
-        
-        if (empty($src)) {
+
+    private static function create_embed_block( $node ) {
+
+        $src = $node->getAttribute( 'src' );
+        if ( ! $src ) {
             return false;
         }
-        
-        // Determine provider based on URL
+
         $provider = '';
-        
-        if (strpos($src, 'youtube.com') !== false || strpos($src, 'youtu.be') !== false) {
+        if ( str_contains( $src, 'youtube' ) || str_contains( $src, 'youtu.be' ) ) {
             $provider = 'youtube';
-        } elseif (strpos($src, 'vimeo.com') !== false) {
+        } elseif ( str_contains( $src, 'vimeo.com' ) ) {
             $provider = 'vimeo';
         }
-        
-        $block_name = !empty($provider) ? 'core-embed/' . $provider : 'core/embed';
-        
+
+        $block_name = $provider ? "core-embed/$provider" : 'core/embed';
+
         return array(
-            'blockName' => $block_name,
-            'attrs' => array(
-                'url' => $src,
+            'blockName'    => $block_name,
+            'attrs'        => array(
+                'url'              => $src,
                 'providerNameSlug' => $provider,
-                'type' => 'rich',
-                'responsive' => true
+                'type'             => 'rich',
+                'responsive'       => true,
             ),
-            'innerBlocks' => array(),
-            'innerHTML' => '<figure class="wp-block-embed-' . esc_attr($provider) . ' wp-block-embed is-type-rich is-provider-' . esc_attr($provider) . '"><div class="wp-block-embed__wrapper">' . $src . '</div></figure>',
-            'innerContent' => array('<figure class="wp-block-embed-' . esc_attr($provider) . ' wp-block-embed is-type-rich is-provider-' . esc_attr($provider) . '"><div class="wp-block-embed__wrapper">' . $src . '</div></figure>')
+            'innerBlocks'  => array(),
+            'innerHTML'    => '<figure class="wp-block-embed-' . esc_attr( $provider ) . ' wp-block-embed is-type-rich is-provider-' . esc_attr( $provider ) . '"><div class="wp-block-embed__wrapper">' . esc_url( $src ) . '</div></figure>',
+            'innerContent' => array(
+                '<figure class="wp-block-embed-' . esc_attr( $provider ) . ' wp-block-embed is-type-rich is-provider-' . esc_attr( $provider ) . '"><div class="wp-block-embed__wrapper">' . esc_url( $src ) . '</div></figure>',
+            ),
         );
     }
-    
-    /**
-     * Get inner HTML of a node
-     *
-     * @param DOMNode $node DOM node
-     * @return string       Inner HTML
-     */
-    private static function get_inner_html($node) {
+
+    private static function get_inner_html( $node ) {
+
         $html = '';
-        
-        $children = $node->childNodes;
-        foreach ($children as $child) {
-            $html .= $node->ownerDocument->saveHTML($child);
+        foreach ( $node->childNodes as $child ) {
+            $html .= $node->ownerDocument->saveHTML( $child );
         }
-        
         return $html;
     }
 }
 
 /**
- * Convert HTML content to Gutenberg blocks
+ * 外部呼叫入口
  *
- * @param string $content HTML content
- * @return string         JSON string of blocks
+ * @param  string $content HTML
+ * @return string          Gutenberg 序列化內容
  */
-function bio_convert_to_blocks($content) {
-    return BIO_Block_Converter::convert_to_blocks($content);
+function bio_convert_to_blocks( $content ) {
+    return BIO_Block_Converter::convert_to_blocks( $content );
 }
