@@ -161,12 +161,54 @@ if (!defined('WPINC')) {
                                 <?php _e('When checked, all imported posts, pages and comments will use your current user as the author, ignoring original author information.', 'blogger-import-opensource'); ?>
                             </p>
                         </fieldset>
+                        <fieldset id="specific-author-options" style="display:none; margin-top: 10px;">
+                            <label for="author-override-id">
+                                <?php _e('Assign posts to a specific user:', 'blogger-import-opensource'); ?>
+                            </label>
+                            <br>
+                            <?php
+                            wp_dropdown_users(array(
+                                'name' => 'author_override_id',
+                                'id' => 'author-override-id',
+                                'show_option_none' => __('Default (Try to match from XML or current user if not matched)', 'blogger-import-opensource'),
+                                'option_none_value' => '0', // Important: value 0 for default behavior
+                                'show' => 'display_name_with_login',
+                                'selected' => 0, // Default to "Try to match..."
+                            ));
+                            ?>
+                            <p class="description">
+                                <?php _e('If "Use current WordPress user" is unchecked, you can choose a specific user here. If "Default" is selected, the importer will try to match the author from the Blogger XML data, or fall back to the current user if no match is found.', 'blogger-import-opensource'); ?>
+                            </p>
+                        </fieldset>
                     </td>
                 </tr>
 
                 <p class="submit">
                     <input type="submit" name="submit" id="submit" class="button button-primary" value="<?php _e('Import', 'blogger-import-opensource'); ?>">
                 </p>
+
+                <script type="text/javascript">
+                    document.addEventListener('DOMContentLoaded', function() {
+                        var useCurrentUserCheckbox = document.getElementById('use-current-user');
+                        var specificAuthorOptions = document.getElementById('specific-author-options');
+
+                        function toggleSpecificAuthorOptions() {
+                            if (useCurrentUserCheckbox.checked) {
+                                specificAuthorOptions.style.display = 'none';
+                            } else {
+                                specificAuthorOptions.style.display = 'block';
+                            }
+                        }
+
+                        // Initial state
+                        toggleSpecificAuthorOptions();
+
+                        // Toggle on change
+                        if (useCurrentUserCheckbox) {
+                            useCurrentUserCheckbox.addEventListener('change', toggleSpecificAuthorOptions);
+                        }
+                    });
+                </script>
             </form>
             
             <div class="bio-import-notice notice notice-warning inline">

@@ -123,9 +123,11 @@ class BIO_Post_Importer {
      *
      * @param array $posts     Array of post data
      * @param bool  $show_progress Whether to update progress (default: true)
+     * @param int   $author_override_id Specific author ID to assign posts to.
+     * @param bool  $use_current_user_for_posts Whether to use the current user if no override/match.
      * @return array           Results with success and failure counts
      */
-    public static function import_posts($posts, $show_progress = true) {
+    public static function import_posts($posts, $show_progress = true, $author_override_id = 0, $use_current_user_for_posts = true) {
         $results = array(
             'total' => count($posts),
             'success' => 0,
@@ -163,9 +165,23 @@ class BIO_Post_Importer {
                 $results['post_ids'][] = $existing_post_id;
                 continue;
             }
+
+            // Prepare post data for import, including author override logic
+            $current_post_data = $post_data; // Work with a copy to avoid modifying the original array in the loop
+
+            if ($author_override_id > 0) {
+                $current_post_data['author_override'] = $author_override_id;
+            } elseif ($use_current_user_for_posts) {
+                // If $author_override_id is 0 (meaning "Default" or no specific user chosen)
+                // and $use_current_user_for_posts is true, import_post will default to current user if no XML match.
+                // If $use_current_user_for_posts is false, and $author_override_id is 0,
+                // import_post will try to match from XML, then fallback to current user.
+                // No explicit action needed here for $use_current_user_for_posts as bio_import_post's logic
+                // already covers these fallbacks. The key is that $author_override_id takes precedence.
+            }
             
             // Import the post
-            $post_id = self::import_post($post_data);
+            $post_id = self::import_post($current_post_data);
             
             if (is_wp_error($post_id)) {
                 $results['failed']++;
@@ -260,10 +276,12 @@ function bio_import_post($post_data) {
  *
  * @param array $posts Array of post data
  * @param bool  $show_progress Whether to update progress
+ * @param int   $author_override_id Specific author ID to assign posts to.
+ * @param bool  $use_current_user_for_posts Whether to use the current user if no override/match.
  * @return array       Results
  */
-function bio_import_posts($posts, $show_progress = true) {
-    return BIO_Post_Importer::import_posts($posts, $show_progress);
+function bio_import_posts($posts, $show_progress = true, $author_override_id = 0, $use_current_user_for_posts = true) {
+    return BIO_Post_Importer::import_posts($posts, $show_progress, $author_override_id, $use_current_user_for_posts);
 }
 
 /**

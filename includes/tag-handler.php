@@ -46,6 +46,11 @@ class BIO_Tag_Handler {
             // Sanitize tag name
             $tag_name = trim($tag_name);
             
+            // Fix encoding for the tag name
+            if (function_exists('bio_fix_encoding')) {
+                $tag_name = bio_fix_encoding($tag_name);
+            }
+            
             // Skip empty tags
             if (empty($tag_name)) {
                 continue;

@@ -212,24 +212,54 @@ class BIO_Admin {
             exit;
         }
         
+        // Get import options
+        $import_media = isset($_POST['import_media']) && $_POST['import_media'] == '1';
+
+        // Determine the author ID for the import
+        $author_id_for_import = 0; // Default: 0 means try to match from XML or fallback based on importer logic
+
+        if (isset($_POST['use_current_user']) && $_POST['use_current_user'] == '1') {
+            $author_id_for_import = get_current_user_id(); // Force current user
+        } else {
+            // Only consider the dropdown if "use_current_user" is NOT checked.
+            $author_id_for_import = isset($_POST['author_override_id']) ? intval($_POST['author_override_id']) : 0;
+        }
+        
+        // Prepare options array for saving
+        $import_options_to_save = array(
+            'skip_media' => !$import_media, // skip_media is inverse of import_media
+            'author_override' => $author_id_for_import,
+            // 'use_current_user' can still be saved for informational purposes or if other parts of the plugin use it,
+            // but author_override is now the definitive value for guiding the import logic.
+            'use_current_user' => (isset($_POST['use_current_user']) && $_POST['use_current_user'] == '1')
+        );
+
+        // Save import options using BIO_DB_Handler
+        BIO_DB_Handler::save_import_options($import_options_to_save);
+        
         // Start the import process
+        // The $options array passed to wp_schedule_single_event should be:
         $options = array(
-            'import_media' => isset($_POST['import_media']) && $_POST['import_media'] == '1',
-            'file_path' => $target_file
+           'file_path' => $target_file
+           // 'import_media' is no longer strictly needed here if bio_process_import uses saved options
+           // but can be kept for backward compatibility or direct use if preferred.
         );
         
         // Set initial progress
+        // Pass the saved options to the progress update, so it reflects the choices made.
         BIO_DB_Handler::update_import_progress(array(
             'step' => 'parsing_xml',
             'current' => 0,
             'total' => 100,
             'percentage' => 0,
             'message' => __('Parsing XML file...', 'blogger-import-opensource'),
-            'options' => $options
+            'options' => $import_options_to_save // Use saved options here
         ));
         
         // Schedule the import process
-        wp_schedule_single_event(time(), 'bio_process_import', array($options));
+        // The options array for the event only needs the file_path,
+        // as other settings are now read from DB by bio_process_import
+        wp_schedule_single_event(time(), 'bio_process_import', array(array('file_path' => $target_file)));
         
         // Redirect to the import page to show progress
         wp_redirect(admin_url('tools.php?page=blogger-import-os'));
@@ -339,24 +369,38 @@ function bio_process_import($options) {
     if (!BIO_DB_Handler::get_import_progress()) {
         return;
     }
-    
+
     try {
-        $file_path = $options['file_path'];
-        $import_media = isset($options['import_media']) ? $options['import_media'] : true;
-        
+        // Retrieve saved import options
+        $saved_options = BIO_DB_Handler::get_import_options();
+        $file_path = $options['file_path']; // From the scheduled event
+        $import_media_flag = !$saved_options['skip_media'];
+        $author_override_id = (int) $saved_options['author_override'];
+        $use_current_user_for_posts = (bool) $saved_options['use_current_user'];
+
         // Check if file exists
         if (!file_exists($file_path)) {
             throw new Exception(__('Import file not found.', 'blogger-import-opensource'));
         }
-        
+
+        // Initial progress update before parsing XML
+        BIO_DB_Handler::update_import_progress(array(
+            'step' => 'initializing_import',
+            'current' => 0,
+            'total' => 100, // General total for this initial step
+            'percentage' => 0,
+            'message' => __('Initializing import process...', 'blogger-import-opensource'),
+            'options' => $saved_options 
+        ));
+
         // Parse XML file
         BIO_DB_Handler::update_import_progress(array(
             'step' => 'parsing_xml',
             'current' => 0,
-            'total' => 100,
+            'total' => 100, // Parsing is a single operation, consider it 100% of this step
             'percentage' => 0,
             'message' => __('Parsing XML file...', 'blogger-import-opensource'),
-            'options' => $options
+            'options' => $saved_options
         ));
         
         $parse_result = bio_parse_blogger_xml($file_path);
@@ -366,25 +410,47 @@ function bio_process_import($options) {
         }
         
         $data = $parse_result['data'];
-        $stats = $parse_result['stats'];
-        
+        $stats = $parse_result['stats']; // Contains counts for posts, pages, comments
+
+        BIO_DB_Handler::update_import_progress(array(
+            'step' => 'xml_parsed',
+            'current' => 100,
+            'total' => 100,
+            'percentage' => 100,
+            'message' => __('XML file parsed successfully.', 'blogger-import-opensource'),
+            'options' => $saved_options
+        ));
+
         // Import posts
-        $post_results = bio_import_posts($data['posts']);
+        BIO_DB_Handler::update_import_progress(array(
+            'step' => 'importing_posts',
+            'current' => 0,
+            'total' => $stats['posts'],
+            'percentage' => 0,
+            'message' => __('Importing posts...', 'blogger-import-opensource'),
+            'options' => $saved_options
+        ));
+        $post_results = bio_import_posts($data['posts'], true, $author_override_id, $use_current_user_for_posts);
         
         // Import pages
-        $page_results = bio_import_posts($data['pages']);
+        BIO_DB_Handler::update_import_progress(array(
+            'step' => 'importing_pages',
+            'current' => 0,
+            'total' => $stats['pages'],
+            'percentage' => 0,
+            'message' => __('Importing pages...', 'blogger-import-opensource'),
+            'options' => $saved_options
+        ));
+        $page_results = bio_import_posts($data['pages'], true, $author_override_id, $use_current_user_for_posts);
         
         // Collect post mappings for comments
         $post_mapping = array();
-        
-        // Get all post mappings
         $all_posts = get_posts(array(
             'post_type' => array('post', 'page'),
             'meta_key' => '_bio_blogger_id',
             'posts_per_page' => -1,
             'fields' => 'ids'
         ));
-        
         foreach ($all_posts as $post_id) {
             $blogger_id = get_post_meta($post_id, '_bio_blogger_id', true);
             if (!empty($blogger_id)) {
@@ -393,7 +459,15 @@ function bio_process_import($options) {
         }
         
         // Import comments
-        $comment_results = bio_import_all_comments($data['comments'], $post_mapping);
+        BIO_DB_Handler::update_import_progress(array(
+            'step' => 'importing_comments',
+            'current' => 0,
+            'total' => $stats['comments'],
+            'percentage' => 0,
+            'message' => __('Importing comments...', 'blogger-import-opensource'),
+            'options' => $saved_options
+        ));
+        $comment_results = bio_import_all_comments($data['comments'], $post_mapping, true); // Pass true for $show_progress
         
         // Import media if enabled
         $media_results = array(
@@ -403,34 +477,48 @@ function bio_process_import($options) {
             'skipped' => 0
         );
         
-        if ($import_media) {
+        if ($import_media_flag) {
+            BIO_DB_Handler::update_import_progress(array(
+                'step' => 'importing_media',
+                'current' => 0,
+                'total' => count($data['media_urls'] ?? []), // Approximate total, actual media items processed by bio_import_all_media
+                'percentage' => 0,
+                'message' => __('Importing media files...', 'blogger-import-opensource'),
+                'options' => $saved_options
+            ));
+
             // Collect post IDs and their media URLs
             $post_media_map = array();
-            
             foreach ($all_posts as $post_id) {
                 $blogger_id = get_post_meta($post_id, '_bio_blogger_id', true);
-                
-                // Find the corresponding entry in the data
                 $media_urls = array();
-                
                 foreach (array_merge($data['posts'], $data['pages']) as $entry) {
                     if ($entry['id'] === $blogger_id && !empty($entry['media_urls'])) {
                         $media_urls = $entry['media_urls'];
                         break;
                     }
                 }
-                
                 if (!empty($media_urls)) {
                     $post_media_map[$post_id] = $media_urls;
                 }
             }
             
-            // Import all media
             if (!empty($post_media_map)) {
-                $media_results = bio_import_all_media($post_media_map);
+                // Assuming bio_import_all_media handles its own progress updates internally
+                $media_results = bio_import_all_media($post_media_map, true); // Pass true for $show_progress if supported
             }
         }
         
+        // Finalizing import
+        BIO_DB_Handler::update_import_progress(array(
+            'step' => 'finalizing_import',
+            'current' => 0, // Or some indication of completion
+            'total' => 100,
+            'percentage' => 99, // Almost done
+            'message' => __('Finalizing import process...', 'blogger-import-opensource'),
+            'options' => $saved_options
+        ));
+
         // Store import stats
         $import_stats = array(
             'date' => current_time('mysql'),
