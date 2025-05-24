@@ -235,8 +235,8 @@ class BIO_XML_Parser {
         $content = (string) $entry->content;
         
         // Fix Unicode escape sequences in title and content
-        $title = $this->fix_unicode_sequences($title);
-        $content = $this->fix_unicode_sequences($content);
+        $title = bio_fix_encoding($title);
+        $content = bio_fix_encoding($content);
         
         $data = array(
             'type' => $entry_type,
@@ -301,7 +301,7 @@ class BIO_XML_Parser {
         
         $content = (string) $entry->content;
         // Fix Unicode escape sequences in comment content
-        $content = $this->fix_unicode_sequences($content);
+        $content = bio_fix_encoding($content);
         
         $data = array(
             'type' => 'comment',
@@ -327,23 +327,6 @@ class BIO_XML_Parser {
         }
         
         return $data;
-    }
-    
-    /**
-     * Fix Unicode escape sequences in text
-     * 
-     * @param string $text Text that might contain Unicode escape sequences
-     * @return string      Fixed text with proper Unicode characters
-     */
-    private function fix_unicode_sequences($text) {
-        // Fix sequences like u5408u7968 (Chinese characters)
-        if (preg_match('/u[0-9a-fA-F]{4}/', $text)) {
-            $text = preg_replace_callback('/u([0-9a-fA-F]{4})/', function($matches) {
-                return json_decode('"\u' . $matches[1] . '"') ?: $matches[0];
-            }, $text);
-        }
-        
-        return $text;
     }
     
     /**
