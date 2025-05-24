@@ -176,7 +176,7 @@ class BIO_Post_Importer {
                 // and $use_current_user_for_posts is true, import_post will default to current user if no XML match.
                 // If $use_current_user_for_posts is false, and $author_override_id is 0,
                 // import_post will try to match from XML, then fallback to current user.
-                // No explicit action needed here for $use_current_user_for_posts as bio_import_post's logic
+                // No explicit action needed here for $use_current_user_for_posts as import_post's logic
                 // already covers these fallbacks. The key is that $author_override_id takes precedence.
             }
             
